@@ -89,10 +89,7 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
 
       if (result.success) {
         showToast('Account created successfully!', 'success');
-        // Small delay to ensure state is updated before navigation
-        setTimeout(() => {
-          navigation.replace('MainTabs');
-        }, 100);
+        // Navigation will happen automatically via AppNavigator when isAuthenticated changes
       } else {
         showToast(result.error || 'Registration failed', 'error');
       }
@@ -129,7 +126,15 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => navigation.goBack()}
+            onPress={() => {
+              if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else {
+                // If can't go back, navigate to Welcome screen
+                navigation.navigate('Welcome');
+              }
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
           </TouchableOpacity>

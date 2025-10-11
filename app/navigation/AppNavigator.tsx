@@ -11,9 +11,12 @@ import RegisterScreen from '../screens/auth/RegisterScreen';
 import WelcomeScreen from '../screens/auth/WelcomeScreen';
 
 // Main Screens
+import FormulaBuilderScreen from '../screens/FormulaBuilderScreen';
+import FormulaDetailScreen from '../screens/FormulaDetailScreen';
 import FormulasScreen from '../screens/FormulasScreen';
 import HomeScreen from '../screens/HomeScreen';
 import IngredientDetailScreen from '../screens/IngredientDetailScreen';
+import IngredientPickerScreen from '../screens/IngredientPickerScreen';
 import IngredientsScreen from '../screens/IngredientsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 
@@ -143,8 +146,12 @@ const MainStack = () => {
       {/* Auth screens accessible from MainStack for guest users */}
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
+      {/* Formula screens */}
+      <Stack.Screen name="FormulaBuilder" component={FormulaBuilderScreen} />
+      <Stack.Screen name="FormulaDetail" component={FormulaDetailScreen} />
+      <Stack.Screen name="IngredientPicker" component={IngredientPickerScreen} />
+      <Stack.Screen name="IngredientPickerDetail" component={IngredientDetailScreen} />
       {/* Add modal screens here later */}
-      {/* TODO: Add FormulaBuilder screen when created */}
     </Stack.Navigator>
   );
 };

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { StackActions } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState } from 'react';
 import {
@@ -10,7 +11,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Button, Card, LoadingSpinner } from '../../components/ui';
+import { Button, Card, LoadingSpinner, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, Ingredient } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
@@ -20,6 +21,7 @@ interface IngredientDetailScreenProps {
   route: {
     params: {
       ingredientId: number;
+      mode?: string;
     };
   };
 }
@@ -28,7 +30,8 @@ export const IngredientDetailScreen: React.FC<any> = ({
   navigation, 
   route 
 }) => {
-  const { ingredientId } = route.params;
+  const { ingredientId, mode } = route.params;
+  const isSelectionMode = mode === 'select';
   const { showToast } = useToast();
   
   const [ingredient, setIngredient] = useState<Ingredient | null>(null);
@@ -58,14 +61,36 @@ export const IngredientDetailScreen: React.FC<any> = ({
   };
 
   const handleAddToFormula = () => {
-    Alert.alert(
-      'Add to Formula',
-      'This feature will allow you to add this ingredient to an existing formula or create a new one.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Coming Soon', style: 'default' },
-      ]
-    );
+    if (isSelectionMode) {
+      if (!ingredient) {
+        showToast('Ingredient not loaded yet', 'error');
+        return;
+      }
+
+      navigation.navigate({
+        name: 'FormulaBuilder',
+        params: {
+          selectedIngredient: ingredient,
+          timestamp: Date.now(),
+        },
+        merge: true,
+      });
+
+      const routesLength = navigation.getState()?.routes?.length ?? 1;
+      const popCount = Math.min(2, Math.max(routesLength - 1, 0));
+      if (popCount > 0) {
+        navigation.dispatch(StackActions.pop(popCount));
+      }
+    } else {
+      Alert.alert(
+        'Add to Formula',
+        'This feature will allow you to add this ingredient to an existing formula or create a new one.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Coming Soon', style: 'default' },
+        ]
+      );
+    }
   };
 
   const getSafetyInfo = (safety: string) => {
@@ -120,7 +145,7 @@ export const IngredientDetailScreen: React.FC<any> = ({
         colors={[theme.colors.primary, theme.colors.secondary]}
         style={styles.container}
       >
-        <LoadingSpinner overlay />
+        <Skeleton />
       </LinearGradient>
     );
   }
@@ -268,12 +293,13 @@ export const IngredientDetailScreen: React.FC<any> = ({
       {/* Bottom Action Bar */}
       <View style={styles.bottomBar}>
         <Button
-          title="Add to Formula"
+          title={isSelectionMode ? "Select Ingredient" : "Add to Formula"}
           variant="primary"
           size="large"
           fullWidth
           onPress={handleAddToFormula}
-          leftIcon={<Ionicons name="add" size={20} color={theme.colors.textPrimary} />}
+          disabled={isSelectionMode && !ingredient}
+          leftIcon={<Ionicons name={isSelectionMode ? "checkmark" : "add"} size={20} color={theme.colors.textPrimary} />}
         />
       </View>
     </LinearGradient>

@@ -1,20 +1,22 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { Badge, Button, Card, LoadingSpinner } from '../../components/ui';
+import { Badge, Button, Card, LoadingSpinner, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, Formula } from '../../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { on } from '../utils/EventBus';
 
 interface HomeScreenProps {
   navigation: any;
@@ -51,9 +53,14 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
     try {
       const response = await apiService.getFormulas();
       if (response.data) {
-        setFormulas(response.data);
-        calculateStats(response.data);
-      } else {
+        // Normalize server `items` into `ingredients` for UI consistency
+        const normalized = response.data.map((f: any) => ({
+          ...f,
+          ingredients: f.items ?? f.ingredients ?? [],
+        }));
+        setFormulas(normalized);
+        calculateStats(normalized);
+      } else if (!response.isAuthError) {
         showToast(response.error || 'Failed to load formulas', 'error');
       }
     } catch (error) {
@@ -62,6 +69,36 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
       setIsLoading(false);
     }
   }, [showToast, isGuestUser]);
+
+  // Event listeners for immediate updates
+  useEffect(() => {
+    const offCreate = on('formula:created', (payload) => {
+      // Prepend the new formula (server response) to the list for immediate feedback
+      try {
+        const newFormula = { ...payload, ingredients: payload.items ?? payload.ingredients ?? [] } as Formula;
+        setFormulas(prev => [newFormula, ...prev]);
+        calculateStats([newFormula, ...formulas]);
+      } catch (e) {
+        console.error('Error handling formula:created', e);
+      }
+    });
+
+    const offIngredient = on('formula:ingredient_added', (payload) => {
+      const { formulaId, item } = payload || {};
+      setFormulas(prev => prev.map(f => {
+        if (f.id === formulaId) {
+          const ingredients = [...(f.ingredients ?? []), item];
+          return { ...f, ingredients } as Formula;
+        }
+        return f;
+      }));
+    });
+
+    return () => {
+      offCreate();
+      offIngredient();
+    };
+  }, [formulas]);
 
   const calculateStats = (formulaList: Formula[]) => {
     const newStats = {
@@ -91,9 +128,7 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
       showToast('Create an account to build formulas', 'info');
       navigation.navigate('Register');
     } else {
-      // For now, navigate to Formulas tab since FormulaBuilder doesn't exist yet
-      navigation.navigate('Formulas');
-      showToast('Formula builder coming soon!', 'info');
+      navigation.navigate('FormulaBuilder');
     }
   };
 
@@ -102,14 +137,19 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
       showToast('Create an account to view formula details', 'info');
       navigation.navigate('Register');
     } else {
-      // TODO: Navigate to formula detail when screen is created
-      showToast('Formula detail view coming soon!', 'info');
+      navigation.navigate('FormulaDetail', { formulaId });
     }
   };
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
@@ -125,14 +165,41 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
 
   const getComplianceStatus = (formula: Formula) => {
     // Simulate compliance status based on formula data
-    if (formula.ingredients.length === 0) return { status: 'EMPTY', variant: 'neutral' as const };
-    if (formula.ingredients.length > 10) return { status: 'RISK', variant: 'error' as const };
-    if (formula.ingredients.length > 5) return { status: 'WARNING', variant: 'warning' as const };
+    const ingredientCount = formula.ingredients?.length ?? 0;
+    if (ingredientCount === 0) return { status: 'EMPTY', variant: 'neutral' as const };
+    if (ingredientCount > 10) return { status: 'RISK', variant: 'error' as const };
+    if (ingredientCount > 5) return { status: 'WARNING', variant: 'warning' as const };
     return { status: 'APPROVED', variant: 'success' as const };
   };
 
+  const normalizeDoseValue = (value: number | string | null | undefined): number => {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    return 0;
+  };
+
   const getTotalWeight = (formula: Formula) => {
-    return formula.ingredients.reduce((total, ing) => total + ing.dose_value, 0);
+    if (!formula.ingredients || !Array.isArray(formula.ingredients)) return 0;
+    return formula.ingredients.reduce((total, ing) => {
+      const doseValue = normalizeDoseValue(ing?.dose_value);
+      const unit = ing?.dose_unit?.toLowerCase?.() ?? 'mg';
+
+      if (unit === 'g') {
+        return total + doseValue * 1000;
+      }
+      if (unit === 'mcg') {
+        return total + doseValue / 1000;
+      }
+
+      return total + doseValue;
+    }, 0);
   };
 
   if (isLoading) {
@@ -141,7 +208,7 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
         colors={[theme.colors.primary, theme.colors.secondary]}
         style={styles.container}
       >
-        <LoadingSpinner overlay />
+        <Skeleton />
       </LinearGradient>
     );
   }
@@ -303,7 +370,7 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
                   
                   <View style={styles.formulaStats}>
                     <Text style={styles.formulaStatText}>
-                      {formula.ingredients.length} ingredients
+                      {formula.ingredients?.length ?? 0} ingredients
                     </Text>
                     <Text style={styles.formulaStatText}>
                       {totalWeight.toFixed(0)} mg

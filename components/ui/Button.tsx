@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useRef } from 'react';
 import {
@@ -7,6 +8,7 @@ import {
   Text,
   TouchableOpacity,
   TouchableOpacityProps,
+  View,
   ViewStyle,
 } from 'react-native';
 import { theme } from '../../constants/theme';
@@ -18,8 +20,8 @@ interface ButtonProps extends TouchableOpacityProps {
   loading?: boolean;
   disabled?: boolean;
   fullWidth?: boolean;
-  leftIcon?: React.ReactNode;
-  rightIcon?: React.ReactNode;
+  leftIcon?: React.ReactNode | keyof typeof Ionicons.glyphMap;
+  rightIcon?: React.ReactNode | keyof typeof Ionicons.glyphMap;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -83,9 +85,21 @@ export const Button: React.FC<ButtonProps> = ({
     style as any,
   ];
 
+  const renderIcon = (icon: React.ReactNode | keyof typeof Ionicons.glyphMap, side: 'left' | 'right') => {
+    if (typeof icon === 'string') {
+      const iconSize = size === 'small' ? 16 : size === 'large' ? 22 : 18;
+      return (
+        <View style={side === 'left' ? styles.leftIconContainer : styles.rightIconContainer}>
+          <Ionicons name={icon as any} size={iconSize} color={textColor} />
+        </View>
+      );
+    }
+    return <View style={side === 'left' ? styles.leftIconContainer : styles.rightIconContainer}>{icon}</View>;
+  };
+
   const renderContent = () => (
     <>
-      {leftIcon && !loading && <>{leftIcon}</>}
+      {leftIcon && !loading && renderIcon(leftIcon, 'left')}
       {loading ? (
         <>
           <ActivityIndicator
@@ -98,7 +112,7 @@ export const Button: React.FC<ButtonProps> = ({
       ) : (
         <Text style={textStyle}>{title}</Text>
       )}
-      {rightIcon && !loading && <>{rightIcon}</>}
+      {rightIcon && !loading && renderIcon(rightIcon, 'right')}
     </>
   );
 
@@ -197,6 +211,12 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.6,
+  },
+  leftIconContainer: {
+    marginRight: theme.spacing.sm,
+  },
+  rightIconContainer: {
+    marginLeft: theme.spacing.sm,
   },
 });
 

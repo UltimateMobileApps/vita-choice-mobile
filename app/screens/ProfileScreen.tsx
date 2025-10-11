@@ -10,7 +10,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Badge, Button, Card, LoadingSpinner } from '../../components/ui';
+import { Badge, Button, Card, LoadingSpinner, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService } from '../../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -107,7 +107,7 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
         colors={[theme.colors.primary, theme.colors.secondary]}
         style={styles.container}
       >
-        <LoadingSpinner overlay />
+        <Skeleton />
       </LinearGradient>
     );
   }

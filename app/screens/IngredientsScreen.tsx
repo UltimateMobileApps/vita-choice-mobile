@@ -1,25 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    FlatList,
-    RefreshControl,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  FlatList,
+  RefreshControl,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Badge, Button, Card, Input, LoadingSpinner } from '../../components/ui';
+import { Badge, Button, Card, Input, LoadingSpinner, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, Ingredient } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
+
+const CACHE_KEY = 'cached_ingredients';
+const CACHE_EXPIRY = 30 * 60 * 1000; // 30 minutes
 
 interface IngredientsScreenProps {
   navigation: any;
 }
 
-export const IngredientsScreen: React.FC<any> = ({ navigation }) => {
+export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
   const { showToast } = useToast();
   
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -34,9 +38,48 @@ export const IngredientsScreen: React.FC<any> = ({ navigation }) => {
     safety: '',
   });
 
-  const loadIngredients = useCallback(async (pageNum = 1, search = '', isRefresh = false) => {
+  // Check if we're in selection mode
+  const isSelectionMode = route?.params?.mode === 'select';
+
+  // Load cached ingredients on mount
+  useEffect(() => {
+    loadCachedIngredients();
+  }, []);
+
+  const loadCachedIngredients = async () => {
     try {
-      if (pageNum === 1) {
+      const cached = await AsyncStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const isExpired = Date.now() - timestamp > CACHE_EXPIRY;
+        
+        if (!isExpired && data.length > 0) {
+          setIngredients(data);
+          setIsLoading(false);
+          // Load fresh data in background
+          loadIngredients(1, '', false, true);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error loading cached ingredients:', error);
+    }
+  };
+
+  const cacheIngredients = async (data: Ingredient[]) => {
+    try {
+      await AsyncStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ data, timestamp: Date.now() })
+      );
+    } catch (error) {
+      console.error('Error caching ingredients:', error);
+    }
+  };
+
+  const loadIngredients = useCallback(async (pageNum = 1, search = '', isRefresh = false, isSilent = false) => {
+    try {
+      if (pageNum === 1 && !isSilent) {
         setIsLoading(true);
       }
 
@@ -56,6 +99,10 @@ export const IngredientsScreen: React.FC<any> = ({ navigation }) => {
         
         if (pageNum === 1 || isRefresh) {
           setIngredients(newIngredients);
+          // Cache first page results when no filters/search applied
+          if (!search && !filters.category && !filters.source && !filters.safety) {
+            cacheIngredients(newIngredients);
+          }
         } else {
           setIngredients(prev => [...prev, ...newIngredients]);
         }
@@ -63,10 +110,14 @@ export const IngredientsScreen: React.FC<any> = ({ navigation }) => {
         setHasMore(newIngredients.length === 20);
         setPage(pageNum);
       } else {
-        showToast(response.error || 'Failed to load ingredients', 'error');
+        if (!isSilent) {
+          showToast(response.error || 'Failed to load ingredients', 'error');
+        }
       }
     } catch (error) {
-      showToast('Network error', 'error');
+      if (!isSilent) {
+        showToast('Network error', 'error');
+      }
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -126,7 +177,12 @@ export const IngredientsScreen: React.FC<any> = ({ navigation }) => {
   const renderIngredient = ({ item }: { item: Ingredient }) => (
     <Card
       style={styles.ingredientCard}
-      onPress={() => navigation.navigate('IngredientDetail', { ingredientId: item.id })}
+      onPress={() => {
+        navigation.navigate('IngredientDetail', { 
+          ingredientId: item.id,
+          mode: isSelectionMode ? 'select' : undefined
+        });
+      }}
     >
       <View style={styles.ingredientHeader}>
         <View style={styles.ingredientInfo}>
@@ -146,6 +202,11 @@ export const IngredientsScreen: React.FC<any> = ({ navigation }) => {
             size={24}
             color={getSafetyColor(item.safety)}
           />
+          {isSelectionMode && (
+            <View style={styles.selectIndicator}>
+              <Ionicons name="add-circle" size={20} color={theme.colors.accent} />
+            </View>
+          )}
         </View>
       </View>
       
@@ -158,17 +219,21 @@ export const IngredientsScreen: React.FC<any> = ({ navigation }) => {
   const renderHeader = () => (
     <View style={styles.header}>
       <View style={styles.headerTop}>
-        <Text style={styles.title}>Ingredients</Text>
-        <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => showToast('Filter modal coming soon!', 'info')}
-        >
-          <Ionicons name="options" size={24} color={theme.colors.accent} />
-        </TouchableOpacity>
+        <Text style={styles.title}>
+          {isSelectionMode ? 'Select Ingredient' : 'Ingredients'}
+        </Text>
+        {!isSelectionMode && (
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => showToast('Filter modal coming soon!', 'info')}
+          >
+            <Ionicons name="options" size={24} color={theme.colors.accent} />
+          </TouchableOpacity>
+        )}
       </View>
       
       <Input
-        placeholder="Search ingredients..."
+        placeholder={isSelectionMode ? "Search ingredients to add..." : "Search ingredients..."}
         value={searchQuery}
         onChangeText={handleSearch}
         leftIcon="search"
@@ -220,7 +285,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation }) => {
       <StatusBar barStyle="light-content" />
       
       {isLoading && page === 1 ? (
-        <LoadingSpinner overlay />
+        <Skeleton />
       ) : (
         <FlatList
           data={ingredients}
@@ -298,6 +363,9 @@ const styles = StyleSheet.create({
   },
   safetyIndicator: {
     alignItems: 'center',
+  },
+  selectIndicator: {
+    marginTop: theme.spacing.xs,
   },
   safetyText: {
     ...theme.getTextStyle('bodySmall'),

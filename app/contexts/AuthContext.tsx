@@ -18,6 +18,7 @@ interface AuthContextType {
   loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (userData: Partial<User>) => Promise<{ success: boolean; error?: string }>;
+  handleAuthFailure: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,6 +37,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isGuestUser, setIsGuestUser] = useState(false);
 
   useEffect(() => {
+    // Set auth failure handler
+    apiService.setAuthFailureHandler(handleAuthFailure);
     checkAuthStatus();
   }, []);
 
@@ -147,6 +150,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const handleAuthFailure = async () => {
+    try {
+      // Clear authentication state
+      setUser(null);
+      setIsGuestUser(false);
+      await AsyncStorage.removeItem('isGuestUser');
+      await apiService.logout();
+    } catch (error) {
+      console.error('Error handling auth failure:', error);
+    }
+  };
+
   const value = {
     user,
     isLoading,
@@ -157,6 +172,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loginAsGuest,
     logout,
     updateUser,
+    handleAuthFailure,
   };
 
   return (

@@ -6,7 +6,7 @@ const API_BASE_URL = 'https://vita-choice-backend.onrender.com/api';
 interface ApiResponse<T = any> {
   data?: T;
   error?: string;
-  message?: string;
+  isAuthError?: boolean;
 }
 
 interface AuthTokens {
@@ -38,7 +38,8 @@ interface Formula {
   name: string;
   description?: string;
   region: 'US' | 'EU' | 'CA' | 'AU';
-  ingredients: FormulaIngredient[];
+  ingredients?: FormulaIngredient[];
+  items?: FormulaIngredient[];
   owner: number;
   created_at: string;
   updated_at: string;
@@ -47,9 +48,10 @@ interface Formula {
 interface FormulaIngredient {
   id: number;
   ingredient: Ingredient;
-  dose_value: number;
+  dose_value: number | string;
   dose_unit: string;
   notes?: string;
+  order?: number;
 }
 
 interface ComplianceResult {
@@ -83,9 +85,15 @@ class ApiService {
   private tokens: AuthTokens | null = null;
   private readonly REQUEST_TIMEOUT = 10000; // 10 seconds
   private readonly MAX_RETRIES = 2;
+  private authFailureHandler?: () => Promise<void>;
 
   constructor() {
     this.loadTokens();
+  }
+
+  // Set auth failure handler
+  setAuthFailureHandler(handler: () => Promise<void>) {
+    this.authFailureHandler = handler;
   }
 
   // Token Management
@@ -119,10 +127,12 @@ class ApiService {
     }
   }
 
-  private async getAuthHeaders(): Promise<Record<string, string>> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+  private async getAuthHeaders(includeContentType: boolean = true): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {};
+
+    if (includeContentType) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (this.tokens?.access) {
       headers.Authorization = `Bearer ${this.tokens.access}`;
@@ -158,9 +168,15 @@ class ApiService {
     options: RequestInit = {},
     retryCount = 0
   ): Promise<ApiResponse<T>> {
+    // Ensure tokens are loaded before making request
+    if (!this.tokens) {
+      await this.loadTokens();
+    }
+
     try {
       const url = `${this.baseURL}${endpoint}`;
-      const headers = await this.getAuthHeaders();
+      const includeContentType = options.method !== 'GET';
+      const headers = await this.getAuthHeaders(includeContentType);
       
       const response = await this.fetchWithTimeout(url, {
         ...options,
@@ -175,7 +191,7 @@ class ApiService {
         const refreshed = await this.refreshToken();
         if (refreshed) {
           // Retry the original request
-          const newHeaders = await this.getAuthHeaders();
+          const newHeaders = await this.getAuthHeaders(includeContentType);
           const retryResponse = await this.fetchWithTimeout(url, {
             ...options,
             headers: {
@@ -190,9 +206,11 @@ class ApiService {
           }
         }
         
-        // If refresh failed, clear tokens and return error
-        await this.clearTokens();
-        return { error: 'Session expired. Please login again.' };
+        // If refresh failed, handle auth failure
+        if (this.authFailureHandler) {
+          await this.authFailureHandler();
+        }
+        return { error: 'Authentication failed. Please login again.', isAuthError: true };
       }
 
       if (!response.ok) {
@@ -428,7 +446,11 @@ class ApiService {
 
   // Formula Methods
   async getFormulas(): Promise<ApiResponse<Formula[]>> {
-    return this.request<Formula[]>('/formulas/');
+    const response = await this.request<{ count: number; results: Formula[] }>('/formulas/');
+    if (response.data) {
+      return { data: response.data.results };
+    }
+    return { error: response.error };
   }
 
   async getFormula(id: number): Promise<ApiResponse<Formula>> {
@@ -472,7 +494,7 @@ class ApiService {
     dose_unit: string;
     notes?: string;
   }): Promise<ApiResponse<FormulaIngredient>> {
-    return this.request<FormulaIngredient>(`/formulas/${formulaId}/ingredients/`, {
+    return this.request<FormulaIngredient>(`/formulas/${formulaId}/add_ingredient/`, {
       method: 'POST',
       body: JSON.stringify(ingredientData),
     });
@@ -487,7 +509,7 @@ class ApiService {
       notes?: string;
     }
   ): Promise<ApiResponse<FormulaIngredient>> {
-    return this.request<FormulaIngredient>(`/formulas/${formulaId}/ingredients/${ingredientId}/`, {
+    return this.request<FormulaIngredient>(`/formulas/${formulaId}/update_ingredient/${ingredientId}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -497,9 +519,12 @@ class ApiService {
     formulaId: number,
     ingredientId: number
   ): Promise<ApiResponse<{ message: string }>> {
-    return this.request<{ message: string }>(`/formulas/${formulaId}/ingredients/${ingredientId}/`, {
-      method: 'DELETE',
-    });
+    return this.request<{ message: string }>(
+      `/formulas/${formulaId}/remove_ingredient/${ingredientId}/`,
+      {
+        method: 'DELETE',
+      }
+    );
   }
 
   // Compliance Methods
@@ -564,9 +589,9 @@ export const apiService = new ApiService();
 
 // Export types
 export type {
-  ApiResponse,
-  AuthTokens, ComplianceIssue, ComplianceResult, Formula,
-  FormulaIngredient, Ingredient, User
+    ApiResponse,
+    AuthTokens, ComplianceIssue, ComplianceResult, Formula,
+    FormulaIngredient, Ingredient, User
 };
 
     export { API_BASE_URL };

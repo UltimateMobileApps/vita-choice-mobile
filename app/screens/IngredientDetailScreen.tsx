@@ -11,7 +11,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Button, Card, LoadingSpinner, Skeleton } from '../../components/ui';
+import { Button, Card, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, Ingredient } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';

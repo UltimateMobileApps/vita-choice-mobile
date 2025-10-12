@@ -55,6 +55,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const RootStack = createNativeStackNavigator();
 
 const AuthStack = () => {
   return (
@@ -159,13 +160,18 @@ const MainStack = () => {
 export const AppNavigator: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
 
-  // Show loading screen while checking auth status
   if (isLoading) {
-    return null; // Or a loading component
+    return null; // Could render a splash/loading component here
   }
 
   return (
-      isAuthenticated ? <MainStack /> : <AuthStack />
+    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+      {isAuthenticated ? (
+        <RootStack.Screen name="Main" component={MainStack} />
+      ) : (
+        <RootStack.Screen name="Auth" component={AuthStack} />
+      )}
+    </RootStack.Navigator>
   );
 };
 

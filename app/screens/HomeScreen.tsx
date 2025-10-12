@@ -3,15 +3,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    RefreshControl,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Badge, Button, Card, LoadingSpinner, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, Formula } from '../../services/api';
 import { useAuth } from '../contexts/AuthContext';

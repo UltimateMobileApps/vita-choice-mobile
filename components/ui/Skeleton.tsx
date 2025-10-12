@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Animated, useWindowDimensions } from 'react-native';
+import { Animated, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { theme } from '../../constants/theme';
 
 const Shimmer = () => {

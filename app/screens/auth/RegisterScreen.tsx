@@ -2,15 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useState } from 'react';
 import {
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Image,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -89,7 +89,6 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
 
       if (result.success) {
         showToast('Account created successfully!', 'success');
-        // Navigation will happen automatically via AppNavigator when isAuthenticated changes
       } else {
         showToast(result.error || 'Registration failed', 'error');
       }

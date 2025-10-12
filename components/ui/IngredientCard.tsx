@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, LayoutAnimation, Platform, UIManager } from 'react-native';
-import Input from './Input';
-import Button from './Button';
-import Badge from './Badge';
 import { Ionicons } from '@expo/vector-icons';
+import React, { useState } from 'react';
+import { LayoutAnimation, Platform, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
 import { theme } from '../../constants/theme';
+import Badge from './Badge';
+import Button from './Button';
+import Input from './Input';
 
 type Ingredient = any;
 

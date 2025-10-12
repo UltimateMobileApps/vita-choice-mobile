@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useState } from 'react';
 import {
-  Image,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Image,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -64,7 +64,6 @@ export const LoginScreen: React.FC<any> = ({ navigation }) => {
       const result = await login(formData.email, formData.password);
       if (result.success) {
         showToast('Logged in successfully!', 'success');
-        // Navigation will happen automatically via AppNavigator when isAuthenticated changes
       } else {
         showToast(result.error || 'Login failed', 'error');
       }

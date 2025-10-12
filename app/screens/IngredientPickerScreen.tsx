@@ -1,15 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    FlatList,
-    RefreshControl,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  FlatList,
+  RefreshControl,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Badge, Button, Card, Input, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
@@ -29,9 +29,13 @@ const IngredientPickerScreen: React.FC<IngredientPickerScreenProps> = ({ navigat
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const initialDebounceSkipRef = useRef(true);
 
   useEffect(() => {
     loadCachedIngredients();
@@ -65,71 +69,107 @@ const IngredientPickerScreen: React.FC<IngredientPickerScreenProps> = ({ navigat
   };
 
   const loadIngredients = useCallback(
-    async (pageNum = 1, search = '', isRefresh = false) => {
+    async ({ page: targetPage = 1, search = '', append = false }: { page?: number; search?: string; append?: boolean } = {}) => {
+      const pageSize = 40;
+      const isFirstPageLoad = !append || targetPage === 1;
+
       try {
-        if (pageNum === 1) {
+        if (append) {
+          setIsLoadingMore(true);
+        } else if (!refreshing) {
           setIsLoading(true);
         }
 
         const params = {
-          page: pageNum,
-          page_size: 20,
+          page: targetPage,
+          page_size: pageSize,
           ...(search && { search }),
         };
 
         const response = await apiService.getIngredients(params);
 
-        if (response.data) {
-          const results = response.data.results;
-
-          if (pageNum === 1 || isRefresh) {
-            setIngredients(results);
-            if (!search) {
-              cacheIngredients(results);
-            }
-          } else {
-            setIngredients(prev => [...prev, ...results]);
-          }
-
-          setHasMore(results.length === 20);
-          setPage(pageNum);
-        } else {
+        if (!response.data) {
           showToast(response.error || 'Failed to load ingredients', 'error');
+          return;
         }
+
+        const { results = [], count, next } = response.data as unknown as {
+          results?: Ingredient[];
+          count?: number;
+          next?: string | null;
+        };
+
+        setActiveSearch(search);
+        setPage(targetPage);
+
+        if (append) {
+          setIngredients(prev => {
+            // Avoid duplicates by id when API returns overlapping data
+            const existingIds = new Set(prev.map(item => item.id));
+            const merged = [...prev];
+            results.forEach(item => {
+              if (!existingIds.has(item.id)) {
+                merged.push(item);
+              }
+            });
+            return merged;
+          });
+        } else {
+          setIngredients(results);
+          if (!search) {
+            cacheIngredients(results);
+          }
+        }
+
+        const pageHasMore = Boolean(next) || (typeof count === 'number' ? targetPage * pageSize < count : results.length === pageSize);
+        setHasMore(pageHasMore);
       } catch (error) {
         showToast('Network error', 'error');
       } finally {
         setIsLoading(false);
+        setIsLoadingMore(false);
         setRefreshing(false);
       }
     },
-    [showToast]
+    [showToast, refreshing]
   );
 
   useEffect(() => {
-    loadIngredients(1, '', true);
+    loadIngredients({ page: 1, search: '' });
   }, [loadIngredients]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadIngredients(1, searchQuery, true);
-  }, [loadIngredients, searchQuery]);
+    await loadIngredients({ page: 1, search: activeSearch });
+  }, [loadIngredients, activeSearch]);
 
-  const loadMore = useCallback(() => {
-    if (!isLoading && hasMore) {
-      loadIngredients(page + 1, searchQuery);
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (initialDebounceSkipRef.current) {
+      initialDebounceSkipRef.current = false;
+      return;
     }
-  }, [isLoading, hasMore, page, searchQuery, loadIngredients]);
 
-  const handleSearch = useCallback(
-    (text: string) => {
-      setSearchQuery(text);
-      if (text.length === 0 || text.length >= 3) {
-        loadIngredients(1, text, true);
-      }
-    },
-    [loadIngredients]
-  );
+    if (debouncedSearch.length === 0 || debouncedSearch.length >= 3) {
+      loadIngredients({ page: 1, search: debouncedSearch });
+    }
+  }, [debouncedSearch, loadIngredients]);
+
+  const handleLoadMore = useCallback(() => {
+    if (isLoading || isLoadingMore || !hasMore) return;
+    loadIngredients({ page: page + 1, search: activeSearch, append: true });
+  }, [isLoading, isLoadingMore, hasMore, page, activeSearch, loadIngredients]);
+
+  const handleSearchInput = useCallback((text: string) => {
+    setSearchQuery(text);
+  }, []);
 
   const handleSelect = (ingredient: Ingredient) => {
     navigation.navigate('FormulaBuilder', {
@@ -239,10 +279,10 @@ const IngredientPickerScreen: React.FC<IngredientPickerScreenProps> = ({ navigat
       <Input
         placeholder="Search ingredients..."
         value={searchQuery}
-        onChangeText={handleSearch}
+        onChangeText={handleSearchInput}
         leftIcon="search"
         rightIcon={searchQuery ? 'close' : undefined}
-        onRightIconPress={() => handleSearch('')}
+        onRightIconPress={() => setSearchQuery('')}
         containerStyle={styles.searchContainer}
       />
     </View>
@@ -265,8 +305,8 @@ const IngredientPickerScreen: React.FC<IngredientPickerScreenProps> = ({ navigat
     >
       <StatusBar barStyle="light-content" />
 
-      {isLoading && page === 1 ? (
-        <Skeleton />
+      {isLoading && ingredients.length === 0 ? (
+        <Skeleton variant="small" lines={1} />
       ) : (
         <FlatList
           data={ingredients}
@@ -277,9 +317,23 @@ const IngredientPickerScreen: React.FC<IngredientPickerScreenProps> = ({ navigat
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.5}
           contentContainerStyle={styles.listContent}
+          ListFooterComponent={
+            hasMore ? (
+              <View style={styles.footer}>
+                {isLoadingMore ? (
+                  <Skeleton variant="small" lines={1} />
+                ) : (
+                  <Button
+                    title="Load more"
+                    variant="outline"
+                    onPress={handleLoadMore}
+                    size="medium"
+                  />
+                )}
+              </View>
+            ) : null
+          }
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -293,6 +347,11 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 40,
+  },
+  footer: {
+    paddingHorizontal: theme.spacing.screenPadding,
+    paddingBottom: theme.spacing.lg,
+    alignItems: 'center',
   },
   header: {
     paddingTop: 60,

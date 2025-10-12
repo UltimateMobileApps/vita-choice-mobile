@@ -3,16 +3,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    FlatList,
-    RefreshControl,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  FlatList,
+  RefreshControl,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Badge, Button, Card, Skeleton } from '../../components/ui';
+import { ActionMenu, Badge, Button, Card, ConfirmDialog, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, Formula } from '../../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -56,6 +55,10 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
       setRefreshing(false);
     }
   }, [showToast, isGuestUser]);
+
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuTargetFormula, setMenuTargetFormula] = useState<Formula | null>(null);
+  const [confirmState, setConfirmState] = useState<{ visible: boolean; title?: string; message?: string; onConfirm?: () => void }>({ visible: false });
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -151,30 +154,25 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const handleDeleteFormula = (formula: Formula) => {
-    Alert.alert(
-      'Delete Formula',
-      `Are you sure you want to delete "${formula.name}"? This action cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete', 
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const response = await apiService.deleteFormula(formula.id);
-              if (response.data) {
-                showToast('Formula deleted successfully', 'success');
-                loadFormulas();
-              } else if (!response.isAuthError) {
-                showToast(response.error || 'Failed to delete formula', 'error');
-              }
-            } catch (error) {
-              showToast('Network error', 'error');
-            }
+    setConfirmState({
+      visible: true,
+      title: 'Delete Formula',
+      message: `Are you sure you want to delete "${formula.name}"? This action cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmState(prev => ({ ...prev, visible: false }));
+        try {
+          const response = await apiService.deleteFormula(formula.id);
+          if (response.data) {
+            showToast('Formula deleted successfully', 'success');
+            loadFormulas();
+          } else if (!response.isAuthError) {
+            showToast(response.error || 'Failed to delete formula', 'error');
           }
-        },
-      ]
-    );
+        } catch (error) {
+          showToast('Network error', 'error');
+        }
+      },
+    });
   };
 
   const handleDuplicateFormula = async (formula: Formula) => {
@@ -192,42 +190,8 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const handleFormulaOptions = (formula: Formula) => {
-    Alert.alert(
-      formula.name,
-      'Choose an action:',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'View Details', 
-          onPress: () => navigation.navigate('FormulaDetail', { formulaId: formula.id })
-        },
-        { 
-          text: 'Edit', 
-          onPress: () => navigation.navigate('FormulaBuilder', {
-            formulaId: formula.id,
-            initialName: formula.name,
-            initialDescription: formula.description ?? '',
-          })
-        },
-        { 
-          text: 'Duplicate', 
-          onPress: () => handleDuplicateFormula(formula)
-        },
-        { 
-          text: 'Check Compliance', 
-          onPress: () => showToast('Compliance check coming soon!', 'info')
-        },
-        { 
-          text: 'Export', 
-          onPress: () => showToast('Export feature coming soon!', 'info')
-        },
-        { 
-          text: 'Delete', 
-          style: 'destructive',
-          onPress: () => handleDeleteFormula(formula)
-        },
-      ]
-    );
+    setMenuTargetFormula(formula);
+    setMenuVisible(true);
   };
 
   const renderFormula = ({ item }: { item: Formula }) => {
@@ -387,6 +351,30 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
           {formulas.length > 0 && renderFloatingButton()}
         </>
       )}
+      <ActionMenu
+        visible={menuVisible}
+        title={menuTargetFormula?.name}
+        items={[
+          { label: 'View Details', icon: 'document-text-outline', onPress: () => { setMenuVisible(false); navigation.navigate('FormulaDetail', { formulaId: menuTargetFormula?.id }); } },
+          { label: 'Edit', icon: 'create-outline', onPress: () => { setMenuVisible(false); navigation.navigate('FormulaBuilder', { formulaId: menuTargetFormula?.id, initialName: menuTargetFormula?.name, initialDescription: menuTargetFormula?.description ?? '' }); } },
+          { label: 'Duplicate', icon: 'copy-outline', onPress: () => { setMenuVisible(false); menuTargetFormula && handleDuplicateFormula(menuTargetFormula); } },
+          { label: 'Check Compliance', icon: 'checkmark-done-outline', onPress: () => { setMenuVisible(false); showToast('Compliance check coming soon!', 'info'); } },
+          { label: 'Export', icon: 'share-outline', onPress: () => { setMenuVisible(false); showToast('Export feature coming soon!', 'info'); } },
+          { label: 'Delete', icon: 'trash-outline', destructive: true, onPress: () => { setMenuVisible(false); menuTargetFormula && handleDeleteFormula(menuTargetFormula); } },
+        ]}
+        onRequestClose={() => setMenuVisible(false)}
+      />
+
+      <ConfirmDialog
+        visible={confirmState.visible}
+        title={confirmState.title}
+        message={confirmState.message}
+        actions={[
+          { text: 'Cancel', style: 'cancel', onPress: () => setConfirmState(prev => ({ ...prev, visible: false })) },
+          { text: 'Delete', style: 'destructive', onPress: confirmState.onConfirm },
+        ]}
+        onRequestClose={() => setConfirmState(prev => ({ ...prev, visible: false }))}
+      />
     </LinearGradient>
   );
 };

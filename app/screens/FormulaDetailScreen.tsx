@@ -3,17 +3,16 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
-  RefreshControl,
-  ScrollView,
-  Share,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    RefreshControl,
+    ScrollView,
+    Share,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { Badge, Button, Card, Skeleton } from '../../components/ui';
+import { ActionMenu, Badge, Button, Card, ConfirmDialog, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, ComplianceResult, Formula } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
@@ -126,34 +125,28 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
 
   const handleDelete = () => {
     if (!formula) return;
-
-    Alert.alert(
-      'Delete Formula',
-      `Are you sure you want to delete "${formula.name}"? This action cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setIsDeleting(true);
-            try {
-              const response = await apiService.deleteFormula(formula.id);
-              if (response.data) {
-                showToast('Formula deleted successfully', 'success');
-                navigation.goBack();
-              } else {
-                showToast(response.error || 'Failed to delete formula', 'error');
-              }
-            } catch (error) {
-              showToast('Network error', 'error');
-            } finally {
-              setIsDeleting(false);
-            }
-          },
-        },
-      ]
-    );
+    setMenuVisible(false);
+    setConfirmState({
+      visible: true,
+      title: 'Delete Formula',
+      message: `Are you sure you want to delete "${formula.name}"? This action cannot be undone.`,
+      onConfirm: async () => {
+        setIsDeleting(true);
+        try {
+          const response = await apiService.deleteFormula(formula.id);
+          if (response.data) {
+            showToast('Formula deleted successfully', 'success');
+            navigation.goBack();
+          } else {
+            showToast(response.error || 'Failed to delete formula', 'error');
+          }
+        } catch (error) {
+          showToast('Network error', 'error');
+        } finally {
+          setIsDeleting(false);
+        }
+      },
+    });
   };
 
   const normalizeDoseValue = (value: number | string | null | undefined): number => {
@@ -191,65 +184,39 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
   };
 
   const handleExport = () => {
-    Alert.alert(
-      'Export Formula',
-      'Choose export format',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Supplement Label',
-          onPress: async () => {
-            try {
-              const response = await apiService.exportSupplementLabel(formulaId);
-              if (response.data) {
-                showToast('Export successful!', 'success');
-                // TODO: Handle download
-              } else {
-                showToast(response.error || 'Export failed', 'error');
-              }
-            } catch (error) {
-              showToast('Network error', 'error');
-            }
-          },
-        },
-        {
-          text: 'CSV',
-          onPress: async () => {
-            try {
-              const response = await apiService.exportFormulaCSV(formulaId);
-              if (response.data) {
-                showToast('Export successful!', 'success');
-                // TODO: Handle download
-              } else {
-                showToast(response.error || 'Export failed', 'error');
-              }
-            } catch (error) {
-              showToast('Network error', 'error');
-            }
-          },
-        },
-        {
-          text: 'Summary PDF',
-          onPress: async () => {
-            try {
-              const response = await apiService.exportFormulaSummary(formulaId);
-              if (response.data) {
-                showToast('Export successful!', 'success');
-                // TODO: Handle download
-              } else {
-                showToast(response.error || 'Export failed', 'error');
-              }
-            } catch (error) {
-              showToast('Network error', 'error');
-            }
-          },
-        },
-      ]
-    );
+    setMenuVisible(true);
   };
+
+  const exportItem = async (type: 'supplement' | 'csv' | 'summary') => {
+    setMenuVisible(false);
+    try {
+      let response: any = null;
+      if (type === 'supplement') {
+        response = await apiService.exportSupplementLabel(formulaId);
+      } else if (type === 'csv') {
+        response = await apiService.exportFormulaCSV(formulaId);
+      } else if (type === 'summary') {
+        response = await apiService.exportFormulaSummary(formulaId);
+      }
+
+      if (response && response.data) {
+        showToast('Export successful!', 'success');
+        // TODO: handle download/path
+      } else {
+        showToast((response && response.error) || 'Export failed', 'error');
+      }
+    } catch (error) {
+      showToast('Network error', 'error');
+    }
+  };
+
+  const [menuVisible, setMenuVisible] = React.useState(false);
+  const [confirmState, setConfirmState] = React.useState<{
+    visible: boolean;
+    title?: string;
+    message?: string;
+    onConfirm?: () => void;
+  }>({ visible: false });
 
   useEffect(() => {
     if (formulaId) {
@@ -536,6 +503,27 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
             leftIcon="trash-outline"
           />
         </View>
+        <ActionMenu
+          visible={menuVisible}
+          title="Export"
+          items={[
+            { label: 'Supplement Label', icon: 'document-text-outline', onPress: () => exportItem('supplement') },
+            { label: 'CSV', icon: 'library-outline', onPress: () => exportItem('csv') },
+            { label: 'Summary PDF', icon: 'document-attach-outline', onPress: () => exportItem('summary') },
+          ]}
+          onRequestClose={() => setMenuVisible(false)}
+        />
+
+        <ConfirmDialog
+          visible={confirmState.visible}
+          title={confirmState.title}
+          message={confirmState.message}
+          actions={[
+            { text: 'Cancel', style: 'cancel', onPress: () => setConfirmState(prev => ({ ...prev, visible: false })) },
+            { text: 'Delete', style: 'destructive', onPress: confirmState.onConfirm },
+          ]}
+          onRequestClose={() => setConfirmState(prev => ({ ...prev, visible: false }))}
+        />
       </ScrollView>
     </LinearGradient>
   );

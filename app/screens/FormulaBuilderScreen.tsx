@@ -2,19 +2,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { emit } from '../../app/utils/EventBus';
-import { Badge, Button, Card, Input, LoadingSpinner, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Input, LoadingSpinner, Skeleton } from '../../components/ui';
 import IngredientCard from '../../components/ui/IngredientCard';
 import { theme } from '../../constants/theme';
 import { apiService, FormulaIngredient, Ingredient } from '../../services/api';
@@ -458,38 +457,38 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
   // No longer needed
 
   const handleRemoveIngredient = (item: FormulaIngredient) => {
-    if (!formulaId) {
-      return;
-    }
-
-    Alert.alert(
-      'Remove Ingredient',
-      `Remove ${item.ingredient.name} from this formula?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            setRemovingItemIds(prev => [...prev, item.id]);
-            try {
-              const response = await apiService.removeIngredientFromFormula(formulaId, item.id);
-              if (!response.error) {
-                setFormulaItems(prev => prev.filter(existing => existing.id !== item.id));
-                showToast('Ingredient removed', 'success');
-              } else {
-                showToast(response.error, 'error');
-              }
-            } catch (error) {
-              showToast('Unable to remove ingredient', 'error');
-            } finally {
-              setRemovingItemIds(prev => prev.filter(id => id !== item.id));
-            }
-          },
-        },
-      ]
-    );
+    if (!formulaId) return;
+    // show confirm dialog
+    setConfirmState({
+      visible: true,
+      title: 'Remove Ingredient',
+      message: `Remove ${item.ingredient.name} from this formula?`,
+      onConfirm: async () => {
+        setConfirmState(prev => ({ ...prev, visible: false }));
+        setRemovingItemIds(prev => [...prev, item.id]);
+        try {
+          const response = await apiService.removeIngredientFromFormula(formulaId, item.id);
+          if (!response.error) {
+            setFormulaItems(prev => prev.filter(existing => existing.id !== item.id));
+            showToast('Ingredient removed', 'success');
+          } else {
+            showToast(response.error, 'error');
+          }
+        } catch (error) {
+          showToast('Unable to remove ingredient', 'error');
+        } finally {
+          setRemovingItemIds(prev => prev.filter(id => id !== item.id));
+        }
+      },
+    });
   };
+
+  const [confirmState, setConfirmState] = useState<{
+    visible: boolean;
+    title?: string;
+    message?: string;
+    onConfirm?: () => void;
+  }>({ visible: false });
 
   const isRemoveLoading = useCallback(
     (id: number) => removingItemIds.includes(id),
@@ -606,9 +605,8 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
     }
 
     if (isLoadingFormula) {
-      // show skeleton placeholder while formula loads
-      const Skeleton = require('../../components/ui/Skeleton').default;
-      return <Skeleton />;
+      // show a compact single-block skeleton for the small ingredients section
+      return <Skeleton variant="small" lines={1} />;
     }
 
     return (
@@ -862,6 +860,16 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
               </View>
             </LinearGradient>
           </Modal>
+          <ConfirmDialog
+            visible={confirmState.visible}
+            title={confirmState.title}
+            message={confirmState.message}
+            actions={[
+              { text: 'Cancel', style: 'cancel', onPress: () => setConfirmState(prev => ({ ...prev, visible: false })) },
+              { text: 'Remove', style: 'destructive', onPress: confirmState.onConfirm },
+            ]}
+            onRequestClose={() => setConfirmState(prev => ({ ...prev, visible: false }))}
+          />
         </ScrollView>
       </KeyboardAvoidingView>
     </LinearGradient>

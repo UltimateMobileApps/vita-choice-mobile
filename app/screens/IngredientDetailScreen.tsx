@@ -3,7 +3,6 @@ import { StackActions } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -11,7 +10,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Button, Card, Skeleton } from '../../components/ui';
+import { Button, Card, ConfirmDialog, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, Ingredient } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
@@ -36,6 +35,7 @@ export const IngredientDetailScreen: React.FC<any> = ({
   
   const [ingredient, setIngredient] = useState<Ingredient | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [confirmState, setConfirmState] = useState<{ visible: boolean; title?: string; message?: string; onConfirm?: () => void }>({ visible: false });
 
   useEffect(() => {
     loadIngredient();
@@ -82,14 +82,12 @@ export const IngredientDetailScreen: React.FC<any> = ({
         navigation.dispatch(StackActions.pop(popCount));
       }
     } else {
-      Alert.alert(
-        'Add to Formula',
-        'This feature will allow you to add this ingredient to an existing formula or create a new one.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Coming Soon', style: 'default' },
-        ]
-      );
+      setConfirmState({
+        visible: true,
+        title: 'Add to Formula',
+        message: 'This feature will allow you to add this ingredient to an existing formula or create a new one.',
+        onConfirm: () => setConfirmState(prev => ({ ...prev, visible: false })),
+      });
     }
   };
 
@@ -289,6 +287,17 @@ export const IngredientDetailScreen: React.FC<any> = ({
           </View>
         </Card>
       </ScrollView>
+
+      <ConfirmDialog
+        visible={confirmState.visible}
+        title={confirmState.title}
+        message={confirmState.message}
+        actions={[
+          { text: 'Cancel', style: 'cancel', onPress: () => setConfirmState(prev => ({ ...prev, visible: false })) },
+          { text: 'OK', style: 'default', onPress: confirmState.onConfirm },
+        ]}
+        onRequestClose={() => setConfirmState(prev => ({ ...prev, visible: false }))}
+      />
 
       {/* Bottom Action Bar */}
       <View style={styles.bottomBar}>

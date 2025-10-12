@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -10,7 +9,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Badge, Button, Card, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService } from '../../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -54,22 +53,18 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Logout', 
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            showToast('Logged out successfully', 'success');
-          }
-        },
-      ]
-    );
+    setConfirmState({
+      visible: true,
+      title: 'Logout',
+      message: 'Are you sure you want to logout?',
+      onConfirm: async () => {
+        await logout();
+        showToast('Logged out successfully', 'success');
+      },
+    });
   };
+
+  const [confirmState, setConfirmState] = useState<{ visible: boolean; title?: string; message?: string; onConfirm?: () => void }>({ visible: false });
 
   const handleEditProfile = () => {
     showToast('Profile editing coming soon!', 'info');
@@ -392,6 +387,16 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
           <Text style={styles.clearToastsText}>Clear All ({toasts.length})</Text>
         </TouchableOpacity>
       )}
+      <ConfirmDialog
+        visible={confirmState.visible}
+        title={confirmState.title}
+        message={confirmState.message}
+        actions={[
+          { text: 'Cancel', style: 'cancel', onPress: () => setConfirmState(prev => ({ ...prev, visible: false })) },
+          { text: 'Logout', style: 'destructive', onPress: confirmState.onConfirm },
+        ]}
+        onRequestClose={() => setConfirmState(prev => ({ ...prev, visible: false }))}
+      />
     </LinearGradient>
   );
 };

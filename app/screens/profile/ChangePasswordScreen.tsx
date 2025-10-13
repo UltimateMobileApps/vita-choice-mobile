@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Button, Card, Input } from '../../../components/ui';
+import { Button, Card, Input, Skeleton } from '../../../components/ui';
 import { theme } from '../../../constants/theme';
 import { apiService } from '../../../services/api';
 import { useToast } from '../../contexts/ToastContext';
@@ -133,7 +133,7 @@ export const ChangePasswordScreen: React.FC<any> = ({ navigation }) => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Card style={styles.formCard}>
+          <View style={styles.formCard}>
             <Text style={styles.description}>
               Choose a strong password to keep your account secure
             </Text>
@@ -277,7 +277,13 @@ export const ChangePasswordScreen: React.FC<any> = ({ navigation }) => {
                 style={styles.submitButton}
               />
             </View>
-          </Card>
+
+            {isLoading && (
+              <View style={styles.skeletonOverlay} pointerEvents="none">
+                <Skeleton />
+              </View>
+            )}
+          </View>
 
           <Card style={styles.infoCard}>
             <View style={styles.infoRow}>
@@ -334,6 +340,7 @@ const styles = StyleSheet.create({
   formCard: {
     marginHorizontal: theme.spacing.screenPadding,
     marginBottom: theme.spacing.lg,
+    position: 'relative',
   },
   description: {
     ...theme.getTextStyle('body'),
@@ -405,6 +412,13 @@ const styles = StyleSheet.create({
     color: theme.colors.textMuted,
     marginLeft: theme.spacing.sm,
     flex: 1,
+  },
+  skeletonOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderRadius: theme.borderRadius.md,
   },
 });
 

@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -12,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Button, Card, Input } from '../../../components/ui';
+import { Button, Card, Input, Skeleton } from '../../../components/ui';
 import { theme } from '../../../constants/theme';
 import { apiService } from '../../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -122,10 +121,7 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
         style={styles.container}
       >
         <StatusBar barStyle="light-content" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.accent} />
-          <Text style={styles.loadingText}>Loading profile...</Text>
-        </View>
+        <Skeleton />
       </LinearGradient>
     );
   }
@@ -158,7 +154,7 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Card style={styles.formCard}>
+          <View style={styles.formCard}>
             <Text style={styles.description}>
               Update your personal information below
             </Text>
@@ -213,7 +209,7 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
                 <Text style={styles.changePasswordText}>Change password</Text>
               </TouchableOpacity>
             </View>
-          </Card>
+          </View>
 
           <Card style={styles.infoCard}>
             <View style={styles.infoRow}>

@@ -27,7 +27,6 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
-    email: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -44,7 +43,6 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
         setFormData({
           first_name: response.data.first_name || '',
           last_name: response.data.last_name || '',
-          email: response.data.email || '',
         });
       } else if (response.error) {
         showToast(response.error, 'error');
@@ -53,7 +51,6 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
           setFormData({
             first_name: user.first_name || '',
             last_name: user.last_name || '',
-            email: user.email || '',
           });
         }
       }
@@ -84,11 +81,7 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
       newErrors.last_name = 'Last name is required';
     }
 
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email';
-    }
+    // Email cannot be changed from this screen
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -101,7 +94,11 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
 
     try {
       setIsLoading(true);
-      const response = await apiService.updateProfile(formData);
+      // Only send first_name and last_name
+      const response = await apiService.updateProfile({
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+      });
 
       if (response.data) {
         showToast('Profile updated successfully', 'success');
@@ -190,18 +187,7 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
               />
             </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Email</Text>
-              <Input
-                placeholder="Enter your email"
-                value={formData.email}
-                onChangeText={(value) => handleChange('email', value)}
-                error={errors.email}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                editable={!isLoading}
-              />
-            </View>
+            {/* Email is not editable here. Change password link is provided below. */}
 
             <View style={styles.buttonContainer}>
               <Button
@@ -220,6 +206,12 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
                 disabled={isLoading}
                 style={styles.submitButton}
               />
+            </View>
+
+            <View style={styles.changePasswordContainer}>
+              <TouchableOpacity onPress={() => navigation.navigate('ChangePassword')}>
+                <Text style={styles.changePasswordText}>Change password</Text>
+              </TouchableOpacity>
             </View>
           </Card>
 
@@ -326,6 +318,15 @@ const styles = StyleSheet.create({
     color: theme.colors.textMuted,
     marginLeft: theme.spacing.sm,
     flex: 1,
+  },
+  changePasswordContainer: {
+    marginTop: theme.spacing.md,
+    alignItems: 'center',
+  },
+  changePasswordText: {
+    ...theme.getTextStyle('body', 'medium'),
+    color: theme.colors.accent,
+    textDecorationLine: 'underline',
   },
 });
 

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ScrollView,
     StatusBar,
@@ -24,33 +25,53 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
     accountCreated: '',
     lastLogin: '',
   });
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+  const loadingRef = React.useRef(false);
 
-  useEffect(() => {
-    // Clear any existing toasts when entering profile screen
-    clearAllToasts();
-    
-    // Only load stats for authenticated users (not guests)
-    if (!isGuestUser && user) {
-      loadStats();
+  const loadStats = useCallback(async () => {
+    // Don't load stats for guest users
+    if (isGuestUser) {
+      return;
     }
-  }, [isGuestUser, user]);
 
-  const loadStats = async () => {
+    // Prevent multiple simultaneous loads using ref
+    if (loadingRef.current) {
+      return;
+    }
+
     try {
+      loadingRef.current = true;
+      setIsLoadingStats(true);
       const response = await apiService.getFormulas();
       if (response.data) {
         setStats(prev => ({
           ...prev,
           totalFormulas: response.data?.length || 0,
         }));
-      } else if (response.error) {
-        showToast(response.error, 'error');
+      } else if (response.error && !response.isAuthError) {
+        // Only show error if not an auth error (auth errors are handled by auth context)
+        console.error('Error loading stats:', response.error);
       }
     } catch (error) {
       console.error('Error loading stats:', error);
-      showToast('Failed to load profile statistics', 'error');
+    } finally {
+      loadingRef.current = false;
+      setIsLoadingStats(false);
     }
-  };
+  }, [isGuestUser]);
+
+  // Clear toasts on mount only (not on every focus)
+  useEffect(() => {
+    clearAllToasts();
+  }, []);
+
+  // Use ONLY useFocusEffect for data loading in tab screens
+  // This prevents duplicate API calls (no separate useEffect needed)
+  useFocusEffect(
+    useCallback(() => {
+      loadStats();
+    }, [loadStats])
+  );
 
   const handleLogout = () => {
     setConfirmState({
@@ -67,11 +88,11 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
   const [confirmState, setConfirmState] = useState<{ visible: boolean; title?: string; message?: string; onConfirm?: () => void }>({ visible: false });
 
   const handleEditProfile = () => {
-    showToast('Profile editing coming soon!', 'info');
+    navigation.navigate('UpdateProfile');
   };
 
   const handleChangePassword = () => {
-    showToast('Password change coming soon!', 'info');
+    navigation.navigate('ChangePassword');
   };
 
   const formatDate = (dateString: string) => {

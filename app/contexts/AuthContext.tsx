@@ -20,6 +20,7 @@ interface AuthContextType {
   loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (userData: Partial<User>) => Promise<{ success: boolean; error?: string }>;
+  refreshUser: () => Promise<void>;
   handleAuthFailure: () => Promise<void>;
 }
 
@@ -203,6 +204,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshUser = async () => {
+    try {
+      const response = await apiService.getUserProfile();
+      if (response.data) {
+        setUser(response.data);
+        await AsyncStorage.setItem('user', JSON.stringify(response.data));
+      }
+    } catch (error) {
+      console.error('Error refreshing user:', error);
+    }
+  };
+
   const value = {
     user,
     isLoading,
@@ -213,6 +226,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loginAsGuest,
     logout,
     updateUser,
+    refreshUser,
     handleAuthFailure,
   };
 

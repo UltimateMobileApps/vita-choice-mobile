@@ -65,13 +65,10 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
     await loadFormulas();
   }, [loadFormulas]);
 
-  useEffect(() => {
-    loadFormulas();
-  }, [loadFormulas]);
-
+  // Use ONLY useFocusEffect for tab screens to prevent duplicate API calls
+  // It handles both initial mount and screen focus
   useFocusEffect(
     useCallback(() => {
-      // Refresh formulas whenever this screen gains focus
       loadFormulas();
     }, [loadFormulas])
   );

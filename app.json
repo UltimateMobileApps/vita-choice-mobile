@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "vita-choice-mobile",
-    "slug": "vita-choice-mobile",
+    "name": "Vita Choice",
+    "slug": "vita-choice",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "vitachoicemobile",
+    "scheme": "vitachoice",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {

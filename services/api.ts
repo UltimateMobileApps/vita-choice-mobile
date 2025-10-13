@@ -123,6 +123,7 @@ class ApiService {
       const rememberFlag = await AsyncStorage.getItem('rememberMe');
       if (rememberFlag !== 'true') {
         // Do not load persisted tokens when remember is false
+        // In-memory tokens will be set via saveTokens() after login
         return;
       }
       const tokensString = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKENS);
@@ -163,9 +164,10 @@ class ApiService {
         await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKENS, JSON.stringify(payload));
       } else {
         // If not persisting tokens, ensure any previously-stored tokens are removed
+        // Note: We keep the user data in storage even when remember is false,
+        // as it's needed for the current session
         try {
           await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKENS);
-          await AsyncStorage.removeItem(STORAGE_KEYS.USER);
         } catch (e) {
           // ignore
         }
@@ -434,11 +436,8 @@ class ApiService {
 
     if (response.data) {
       await this.saveTokens(response.data.tokens);
-      if (this.persistTokens) {
-        await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data.user));
-      } else {
-        await AsyncStorage.removeItem(STORAGE_KEYS.USER);
-      }
+      // Always save user data for the current session, regardless of remember me choice
+      await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data.user));
     }
 
     return response;
@@ -455,11 +454,8 @@ class ApiService {
 
     if (response.data) {
       await this.saveTokens(response.data.tokens);
-      if (this.persistTokens) {
-        await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data.user));
-      } else {
-        await AsyncStorage.removeItem(STORAGE_KEYS.USER);
-      }
+      // Always save user data for the current session, regardless of remember me choice
+      await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data.user));
     }
 
     return response;
@@ -557,15 +553,27 @@ class ApiService {
     }
   }
 
+  // Get user profile from API
+  async getUserProfile(): Promise<ApiResponse<User>> {
+    return this.request<User>('/auth/me/');
+  }
+
   async updateProfile(userData: Partial<User>): Promise<ApiResponse<User>> {
-    return this.request<User>('/auth/user/', {
-      method: 'PATCH',
+    const response = await this.request<User>('/auth/me/', {
+      method: 'PUT',
       body: JSON.stringify(userData),
     });
+
+    // Update local storage if successful
+    if (response.data && this.persistTokens) {
+      await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data));
+    }
+
+    return response;
   }
 
   async changePassword(data: {
-    current_password: string;
+    old_password: string;
     new_password: string;
   }): Promise<ApiResponse<{ message: string }>> {
     return this.request<{ message: string }>('/auth/change-password/', {

@@ -20,6 +20,10 @@ import IngredientPickerScreen from '../screens/IngredientPickerScreen';
 import IngredientsScreen from '../screens/IngredientsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 
+// Profile Screens
+import ChangePasswordScreen from '../screens/profile/ChangePasswordScreen';
+import UpdateProfileScreen from '../screens/profile/UpdateProfileScreen';
+
 // Placeholder screens - will be created
 // const FormulasScreen = () => {
 //   const { View, Text, StyleSheet } = require('react-native');
@@ -152,6 +156,9 @@ const MainStack = () => {
       <Stack.Screen name="FormulaDetail" component={FormulaDetailScreen} />
       <Stack.Screen name="IngredientPicker" component={IngredientPickerScreen} />
       <Stack.Screen name="IngredientPickerDetail" component={IngredientDetailScreen} />
+      {/* Profile screens */}
+      <Stack.Screen name="UpdateProfile" component={UpdateProfileScreen} />
+      <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
       {/* Add modal screens here later */}
     </Stack.Navigator>
   );

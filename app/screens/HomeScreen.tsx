@@ -141,10 +141,8 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
+  // Use ONLY useFocusEffect for tab screens to prevent duplicate API calls
+  // It handles both initial mount and screen focus
   useFocusEffect(
     useCallback(() => {
       loadData();

@@ -1,13 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { apiService, User } from '../../services/api';
+import { useToast } from './ToastContext';
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   isGuestUser: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string, remember?: boolean) => Promise<{ success: boolean; error?: string }>;
   register: (userData: {
     email: string;
     password: string;
@@ -35,12 +37,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGuestUser, setIsGuestUser] = useState(false);
+  const { showToast } = useToast();
+
+  const handleAuthFailure = useCallback(async (reason?: 'refresh-expired' | 'auth-error', message?: string) => {
+    try {
+      setUser(null);
+      setIsGuestUser(false);
+      await AsyncStorage.removeItem('isGuestUser');
+      await AsyncStorage.removeItem('rememberMe');
+      await apiService.logout();
+    } catch (error) {
+      console.error('Error handling auth failure:', error);
+    } finally {
+      setIsLoading(false);
+    }
+
+    const toastMessage = message ?? (reason === 'refresh-expired'
+      ? 'Session expired. Please sign in again.'
+      : 'Authentication failed. Please login again.');
+    const tone = reason === 'refresh-expired' ? 'warning' : 'error';
+    showToast(toastMessage, tone);
+  }, [showToast]);
+
+  const handleAppStateChange = useCallback((nextState: AppStateStatus) => {
+    if (nextState === 'active') {
+      apiService.ensureFreshAccessToken().catch(error => {
+        console.error('Failed to refresh session on resume', error);
+      });
+    }
+  }, []);
 
   useEffect(() => {
     // Set auth failure handler
     apiService.setAuthFailureHandler(handleAuthFailure);
     checkAuthStatus();
-  }, []);
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, [handleAuthFailure, handleAppStateChange]);
 
   const checkAuthStatus = async () => {
     try {
@@ -52,10 +88,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      // Check remember me flag
+      const rememberFlag = await AsyncStorage.getItem('rememberMe');
+      // Configure apiService persistence based on remember flag
+      apiService.setPersistTokens(rememberFlag === 'true');
+      // If remember flag is not set to 'true' we still allow in-memory tokens to be used
       // Check for authenticated user
       if (apiService.isAuthenticated()) {
         const currentUser = await apiService.getCurrentUser();
         setUser(currentUser);
+        await apiService.ensureFreshAccessToken();
       }
     } catch (error) {
       console.error('Error checking auth status:', error);
@@ -64,15 +106,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, remember: boolean = false) => {
     try {
+      // Configure persistence before attempting login
+      apiService.setPersistTokens(remember);
+      // Persist remember choice so future app starts know the preference
       const response = await apiService.login({ email, password });
       
       if (response.data) {
         setUser(response.data.user);
+        // Persist remember choice
+        if (remember) {
+          await AsyncStorage.setItem('rememberMe', 'true');
+        } else {
+          await AsyncStorage.removeItem('rememberMe');
+        }
         // Clear any guest user status
         setIsGuestUser(false);
         await AsyncStorage.removeItem('isGuestUser');
+        await apiService.ensureFreshAccessToken();
         return { success: true };
       } else {
         return { success: false, error: response.error || 'Login failed' };
@@ -127,6 +179,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       setIsGuestUser(false);
       await AsyncStorage.removeItem('isGuestUser');
+      await AsyncStorage.removeItem('rememberMe');
     } catch (error) {
       console.error('Error during logout:', error);
     } finally {
@@ -147,18 +200,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (error) {
       return { success: false, error: 'Network error' };
-    }
-  };
-
-  const handleAuthFailure = async () => {
-    try {
-      // Clear authentication state
-      setUser(null);
-      setIsGuestUser(false);
-      await AsyncStorage.removeItem('isGuestUser');
-      await apiService.logout();
-    } catch (error) {
-      console.error('Error handling auth failure:', error);
     }
   };
 

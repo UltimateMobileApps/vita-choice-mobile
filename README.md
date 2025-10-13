@@ -1,50 +1,69 @@
-# Welcome to your Expo app 👋
+# Vita Choice — Mobile (Expo)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A compact developer README for the Vita Choice mobile app (Expo).
 
-## Get started
+## Purpose
 
-1. Install dependencies
+This README is focused on getting the project running and testing against a local backend. It intentionally keeps feature descriptions brief — use the code and inline docs for implementation details.
 
-   ```bash
-   npm install
-   ```
+## Quick start
 
-2. Start the app
+Prerequisites:
+- Node.js (14+ recommended)
+- npm
+- Expo CLI (optional; `npx expo` works)
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Install and run:
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Open on a simulator, emulator, or device via the QR / Expo Dev Tools.
 
-## Learn more
+## Local backend & networking notes
 
-To learn more about developing your project with Expo, look at the following resources:
+When testing against a backend running on your machine, remember:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- `localhost` in the app refers to the device/emulator, not your computer.
+- Edit `services/api.ts` and set `API_BASE_URL` to one of:
+  - Your machine IP: `http://192.168.x.y:8000/api`
+  - Android emulator (AVD): `http://10.0.2.2:8000/api`
+  - iOS simulator: `http://localhost:8000/api`
+  - Expose with ngrok: `ngrok http 8000` and use the provided HTTPS URL.
 
-## Join the community
+After changing `API_BASE_URL`, restart the Expo server and reload the app.
 
-Join our community of developers creating universal apps.
+## Authentication behavior (short)
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- Registration and login immediately persist tokens and user profile when "Remember me" is enabled.
+- The app proactively refreshes access tokens before they expire. For dev/testing we added a small adaptive safety window to avoid repeated refresh calls for very short TTLs.
+- If the refresh token expires, the app clears auth state and shows a toast to the user.
+
+If you need to tune refresh timing for tests, edit the timing constants in `services/api.ts`.
+
+## Short feature list
+
+- Register / Login / Logout / Guest mode
+- Token lifecycle management (access + refresh) with proactive refresh
+- Browse ingredients, view details, cached categories/sources
+- Create/update/delete/duplicate formulas, add/remove ingredients
+- Compliance check endpoint integration
+- Export label/summary/CSV for formulas
+- Basic toast notifications and reusable UI components
+
+## Developing
+
+- Code lives under `app/` (screens, navigation) and `components/` (UI primitives).
+- API client and token logic are in `services/api.ts`.
+- Context providers are in `app/contexts/` (Auth + Toast).
+
+## Troubleshooting
+
+- No requests reaching backend: confirm backend listening on the chosen IP/port and firewall allows connections.
+- Many immediate `/auth/refresh/` requests: this happens with very short access-token TTLs. Increase TTL for normal testing or tune constants in `services/api.ts`.
+- CORS issues (web): enable the app origin on your backend.
+
+## Contributing
+

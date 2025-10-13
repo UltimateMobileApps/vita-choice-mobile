@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { decode as base64Decode } from 'base-64';
 
 // API configuration
 const API_BASE_URL = 'https://vita-choice-backend.onrender.com/api';
+// const API_BASE_URL = 'https://309a627b3067.ngrok-free.app/api'
 
 interface ApiResponse<T = any> {
   data?: T;
@@ -13,6 +15,14 @@ interface AuthTokens {
   access: string;
   refresh: string;
 }
+
+interface PersistedAuthState {
+  tokens: AuthTokens;
+  accessExpiresAt: number | null;
+  refreshExpiresAt: number | null;
+}
+
+type AuthFailureReason = 'refresh-expired' | 'auth-error';
 
 interface User {
   id: number;
@@ -83,25 +93,56 @@ const STORAGE_KEYS = {
 class ApiService {
   private baseURL = API_BASE_URL;
   private tokens: AuthTokens | null = null;
+  private accessTokenExpiresAt: number | null = null;
+  private refreshTokenExpiresAt: number | null = null;
+  // When true, tokens are persisted to AsyncStorage. Can be toggled by the app (Remember Me).
+  private persistTokens: boolean = true;
+  private proactiveRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  private refreshInFlight: Promise<boolean> | null = null;
   private readonly REQUEST_TIMEOUT = 10000; // 10 seconds
   private readonly MAX_RETRIES = 2;
-  private authFailureHandler?: () => Promise<void>;
+  private readonly REFRESH_SAFETY_WINDOW = 2 * 60 * 1000; // 2 minutes max lead time
+  private readonly MIN_REFRESH_SAFETY_WINDOW = 5000; // 5 seconds
+  private readonly MIN_REFRESH_DELAY = 5000; // 5 seconds
+  private readonly REFRESH_RETRY_DELAYS = [2000, 5000, 10000];
+  private authFailureHandler?: (reason?: AuthFailureReason, message?: string) => Promise<void>;
 
   constructor() {
     this.loadTokens();
   }
 
   // Set auth failure handler
-  setAuthFailureHandler(handler: () => Promise<void>) {
+  setAuthFailureHandler(handler: (reason?: AuthFailureReason, message?: string) => Promise<void>) {
     this.authFailureHandler = handler;
   }
 
   // Token Management
   private async loadTokens(): Promise<void> {
     try {
+      // Only load tokens from storage if the user previously chose "remember me".
+      const rememberFlag = await AsyncStorage.getItem('rememberMe');
+      if (rememberFlag !== 'true') {
+        // Do not load persisted tokens when remember is false
+        return;
+      }
       const tokensString = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKENS);
       if (tokensString) {
-        this.tokens = JSON.parse(tokensString);
+        try {
+          const parsed: PersistedAuthState | AuthTokens = JSON.parse(tokensString);
+          if ('tokens' in parsed) {
+            this.tokens = parsed.tokens;
+            this.accessTokenExpiresAt = parsed.accessExpiresAt ?? null;
+            this.refreshTokenExpiresAt = parsed.refreshExpiresAt ?? null;
+          } else {
+            // Backwards compatibility with old shape that only stored tokens
+            this.tokens = parsed;
+            this.accessTokenExpiresAt = this.decodeTokenExpiry(parsed.access);
+            this.refreshTokenExpiresAt = this.decodeTokenExpiry(parsed.refresh);
+          }
+          this.scheduleProactiveRefresh();
+        } catch (parseError) {
+          console.error('Failed to parse stored auth tokens', parseError);
+        }
       }
     } catch (error) {
       console.error('Error loading tokens:', error);
@@ -111,15 +152,44 @@ class ApiService {
   private async saveTokens(tokens: AuthTokens): Promise<void> {
     try {
       this.tokens = tokens;
-      await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKENS, JSON.stringify(tokens));
+      this.accessTokenExpiresAt = this.decodeTokenExpiry(tokens.access);
+      this.refreshTokenExpiresAt = this.decodeTokenExpiry(tokens.refresh);
+      if (this.persistTokens) {
+        const payload: PersistedAuthState = {
+          tokens,
+          accessExpiresAt: this.accessTokenExpiresAt,
+          refreshExpiresAt: this.refreshTokenExpiresAt,
+        };
+        await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKENS, JSON.stringify(payload));
+      } else {
+        // If not persisting tokens, ensure any previously-stored tokens are removed
+        try {
+          await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKENS);
+          await AsyncStorage.removeItem(STORAGE_KEYS.USER);
+        } catch (e) {
+          // ignore
+        }
+      }
+      this.scheduleProactiveRefresh();
     } catch (error) {
       console.error('Error saving tokens:', error);
     }
   }
 
+  // Control whether tokens should be persisted to AsyncStorage (used for Remember Me)
+  setPersistTokens(shouldPersist: boolean) {
+    this.persistTokens = shouldPersist;
+  }
+
   private async clearTokens(): Promise<void> {
     try {
       this.tokens = null;
+      this.accessTokenExpiresAt = null;
+      this.refreshTokenExpiresAt = null;
+      if (this.proactiveRefreshTimeout) {
+        clearTimeout(this.proactiveRefreshTimeout);
+        this.proactiveRefreshTimeout = null;
+      }
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKENS);
       await AsyncStorage.removeItem(STORAGE_KEYS.USER);
     } catch (error) {
@@ -188,7 +258,7 @@ class ApiService {
 
       if (response.status === 401 && this.tokens?.refresh) {
         // Try to refresh token
-        const refreshed = await this.refreshToken();
+  const refreshed = await this.refreshToken('request');
         if (refreshed) {
           // Retry the original request
           const newHeaders = await this.getAuthHeaders(includeContentType);
@@ -208,7 +278,7 @@ class ApiService {
         
         // If refresh failed, handle auth failure
         if (this.authFailureHandler) {
-          await this.authFailureHandler();
+          await this.authFailureHandler('auth-error', 'Authentication failed. Please login again.');
         }
         return { error: 'Authentication failed. Please login again.', isAuthError: true };
       }
@@ -257,6 +327,98 @@ class ApiService {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  private decodeTokenExpiry(token: string): number | null {
+    if (!token) return null;
+    try {
+      const parts = token.split('.');
+      if (parts.length < 2) return null;
+      const base64Payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padding = '='.repeat((4 - (base64Payload.length % 4)) % 4);
+      const decoded = base64Decode(base64Payload + padding);
+      const payload = JSON.parse(decoded);
+      if (payload && typeof payload.exp === 'number') {
+        return payload.exp * 1000; // convert seconds to ms
+      }
+    } catch (error) {
+      console.warn('Failed to decode JWT expiry', error);
+    }
+    return null;
+  }
+
+  private clearProactiveRefreshTimer() {
+    if (this.proactiveRefreshTimeout) {
+      clearTimeout(this.proactiveRefreshTimeout);
+      this.proactiveRefreshTimeout = null;
+    }
+  }
+
+  private scheduleProactiveRefresh() {
+    this.clearProactiveRefreshTimer();
+    if (!this.accessTokenExpiresAt || !this.tokens?.refresh) {
+      return;
+    }
+
+    const now = Date.now();
+    const msUntilExpiry = this.accessTokenExpiresAt - now;
+    if (msUntilExpiry <= 0) {
+      // Already expired or invalid — attempt immediate refresh
+      this.refreshToken('proactive').catch(error => {
+        console.error('Proactive refresh failed', error);
+      });
+      return;
+    }
+
+    const dynamicSafetyWindow = Math.min(
+      this.REFRESH_SAFETY_WINDOW,
+      Math.max(Math.floor(msUntilExpiry * 0.25), this.MIN_REFRESH_SAFETY_WINDOW)
+    );
+    const delayMs = Math.max(
+      this.MIN_REFRESH_DELAY,
+      msUntilExpiry - dynamicSafetyWindow
+    );
+
+    this.proactiveRefreshTimeout = setTimeout(() => {
+      this.refreshToken('proactive').catch(error => {
+        console.error('Scheduled proactive refresh failed', error);
+      });
+    }, delayMs);
+  }
+
+  async ensureFreshAccessToken(minValidityMs: number = this.REFRESH_SAFETY_WINDOW): Promise<boolean> {
+    if (!this.tokens?.access) {
+      return false;
+    }
+
+    if (!this.accessTokenExpiresAt) {
+      return true;
+    }
+
+    const remaining = this.accessTokenExpiresAt - Date.now();
+    const dynamicValidityThreshold = Math.min(
+      minValidityMs,
+      Math.max(Math.floor(remaining * 0.25), this.MIN_REFRESH_SAFETY_WINDOW)
+    );
+
+    if (remaining > dynamicValidityThreshold) {
+      return true;
+    }
+
+    const refreshed = await this.refreshToken('proactive');
+    return refreshed;
+  }
+
+  shouldPersistAuthTokens(): boolean {
+    return this.persistTokens;
+  }
+
+  getAccessTokenExpiry(): number | null {
+    return this.accessTokenExpiresAt;
+  }
+
+  getRefreshTokenExpiry(): number | null {
+    return this.refreshTokenExpiresAt;
+  }
+
   // Authentication Methods
   async register(userData: {
     email: string;
@@ -272,7 +434,11 @@ class ApiService {
 
     if (response.data) {
       await this.saveTokens(response.data.tokens);
-      await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data.user));
+      if (this.persistTokens) {
+        await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data.user));
+      } else {
+        await AsyncStorage.removeItem(STORAGE_KEYS.USER);
+      }
     }
 
     return response;
@@ -289,32 +455,91 @@ class ApiService {
 
     if (response.data) {
       await this.saveTokens(response.data.tokens);
-      await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data.user));
+      if (this.persistTokens) {
+        await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(response.data.user));
+      } else {
+        await AsyncStorage.removeItem(STORAGE_KEYS.USER);
+      }
     }
 
     return response;
   }
 
-  async refreshToken(): Promise<boolean> {
-    if (!this.tokens?.refresh) return false;
+  // Check if an email is available for registration. Backend may support
+  // /auth/check-email/?email=... returning { available: boolean }
+  async checkEmailAvailability(email: string): Promise<ApiResponse<{ available: boolean }>> {
+    if (!email) return { error: 'No email provided' };
 
+    const params = new URLSearchParams({ email });
     try {
-      const response = await this.fetchWithTimeout(`${this.baseURL}/auth/refresh/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh: this.tokens.refresh }),
-      });
+      const response = await this.request<{ available: boolean }>(`/auth/check-email/?${params.toString()}`);
+      return response;
+    } catch (error: any) {
+      // If the endpoint doesn't exist or fails, return an error message
+      console.error('checkEmailAvailability error:', error);
+      return { error: 'Could not verify email availability' };
+    }
+  }
 
-      if (response.ok) {
-        const data = await response.json();
-        await this.saveTokens({ access: data.access, refresh: this.tokens.refresh });
-        return true;
-      }
-    } catch (error) {
-      console.error('Token refresh error:', error);
+  async refreshToken(trigger: 'request' | 'proactive' | 'resume' = 'request'): Promise<boolean> {
+    if (!this.tokens?.refresh) {
+      return false;
     }
 
-    return false;
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+
+    const performRefresh = async (): Promise<boolean> => {
+      for (let attempt = 0; attempt <= this.REFRESH_RETRY_DELAYS.length; attempt++) {
+        try {
+          const response = await this.fetchWithTimeout(`${this.baseURL}/auth/refresh/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh: this.tokens?.refresh }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            const newTokens: AuthTokens = {
+              access: data.access,
+              refresh: data.refresh ?? this.tokens!.refresh,
+            };
+            await this.saveTokens(newTokens);
+            return true;
+          }
+
+          if (response.status === 401 || response.status === 403) {
+            console.warn('Refresh token expired or invalid');
+            await this.clearTokens();
+            if (this.authFailureHandler) {
+              await this.authFailureHandler('refresh-expired', 'Session expired. Please sign in again.');
+            }
+            return false;
+          }
+
+          const errorData = await response.json().catch(() => undefined);
+          console.error(`Refresh token failed (status ${response.status})`, errorData);
+        } catch (error) {
+          console.error('Refresh token request error:', error);
+        }
+
+        if (attempt < this.REFRESH_RETRY_DELAYS.length) {
+          const delayMs = this.REFRESH_RETRY_DELAYS[attempt];
+          await this.delay(delayMs);
+        }
+      }
+
+      console.error('Refresh token attempts exhausted');
+      return false;
+    };
+
+    this.refreshInFlight = performRefresh().finally(() => {
+      this.refreshInFlight = null;
+    });
+
+    const success = await this.refreshInFlight;
+    return success;
   }
 
   async logout(): Promise<void> {
@@ -589,9 +814,9 @@ export const apiService = new ApiService();
 
 // Export types
 export type {
-    ApiResponse,
-    AuthTokens, ComplianceIssue, ComplianceResult, Formula,
-    FormulaIngredient, Ingredient, User
+  ApiResponse,
+  AuthTokens, ComplianceIssue, ComplianceResult, Formula,
+  FormulaIngredient, Ingredient, User
 };
 
     export { API_BASE_URL };

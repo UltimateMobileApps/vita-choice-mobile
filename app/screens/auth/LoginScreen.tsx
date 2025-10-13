@@ -26,6 +26,7 @@ export const LoginScreen: React.FC<any> = ({ navigation }) => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -61,7 +62,7 @@ export const LoginScreen: React.FC<any> = ({ navigation }) => {
 
     setIsSubmitting(true);
     try {
-      const result = await login(formData.email, formData.password);
+      const result = await login(formData.email, formData.password, rememberMe);
       if (result.success) {
         showToast('Logged in successfully!', 'success');
       } else {
@@ -136,6 +137,30 @@ export const LoginScreen: React.FC<any> = ({ navigation }) => {
             rightIcon={showPassword ? "eye-off" : "eye"}
             onRightIconPress={() => setShowPassword(!showPassword)}
           />
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: theme.spacing.sm }}>
+            <TouchableOpacity
+              onPress={() => setRememberMe(prev => !prev)}
+              style={{ flexDirection: 'row', alignItems: 'center' }}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: rememberMe }}
+            >
+              <View style={{
+                width: 20,
+                height: 20,
+                borderRadius: 4,
+                borderWidth: 1,
+                borderColor: rememberMe ? theme.colors.accent : theme.colors.border,
+                backgroundColor: rememberMe ? theme.colors.accent : 'transparent',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginRight: theme.spacing.sm
+              }}>
+                {rememberMe ? <Ionicons name="checkmark" size={14} color={theme.colors.textPrimary} /> : null}
+              </View>
+              <Text style={{ ...theme.getTextStyle('body'), color: theme.colors.textPrimary }}>Remember me</Text>
+            </TouchableOpacity>
+          </View>
 
           <Button
             title="Login"

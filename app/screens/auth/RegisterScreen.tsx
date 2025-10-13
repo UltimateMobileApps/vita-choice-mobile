@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     Image,
     KeyboardAvoidingView,
@@ -15,6 +15,7 @@ import {
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { theme } from '../../../constants/theme';
+import { apiService } from '../../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 
@@ -33,6 +34,9 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emailAvailable, setEmailAvailable] = useState<boolean | null>(null);
+  const [checkingEmail, setCheckingEmail] = useState(false);
+  const [passwordStrength, setPasswordStrength] = useState<'weak'|'medium'|'strong'|'empty'>('empty');
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -71,6 +75,52 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
     setFormData(prev => ({ ...prev, [field]: text }));
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
   }, [errors]);
+
+  // Debounced email availability check
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const email = formData.email.trim();
+    setEmailAvailable(null);
+
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      setEmailAvailable(null);
+      return;
+    }
+
+    setCheckingEmail(true);
+    timeout = setTimeout(async () => {
+      try {
+        const res = await apiService.checkEmailAvailability(email);
+        if (res.data && typeof res.data.available === 'boolean') {
+          setEmailAvailable(res.data.available);
+        } else {
+          setEmailAvailable(null);
+        }
+      } catch (e) {
+        setEmailAvailable(null);
+      } finally {
+        setCheckingEmail(false);
+      }
+    }, 500);
+
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [formData.email]);
+
+  // Password strength simple heuristic
+  useEffect(() => {
+    const pw = formData.password || '';
+    if (!pw) return setPasswordStrength('empty');
+    if (pw.length < 6) return setPasswordStrength('weak');
+    const hasMixed = /(?=.*[a-z])(?=.*[A-Z])/.test(pw);
+    const hasNumber = /\d/.test(pw);
+    const hasSymbol = /[^A-Za-z0-9]/.test(pw);
+
+    if (pw.length >= 10 && hasMixed && hasNumber && hasSymbol) setPasswordStrength('strong');
+    else if (pw.length >= 8 && (hasMixed || hasNumber)) setPasswordStrength('medium');
+    else setPasswordStrength('weak');
+  }, [formData.password]);
 
   const handleRegister = useCallback(async () => {
     if (!validateForm()) {
@@ -180,6 +230,15 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
             autoCapitalize="none"
             autoCorrect={false}
           />
+          <View style={{ marginTop: theme.spacing.xs, marginBottom: theme.spacing.sm }}>
+            {checkingEmail ? (
+              <Text style={{ ...theme.getTextStyle('caption'), color: theme.colors.textMuted }}>Checking email…</Text>
+            ) : emailAvailable === true ? (
+              <Text style={{ ...theme.getTextStyle('caption'), color: theme.colors.success }}>Email available</Text>
+            ) : emailAvailable === false ? (
+              <Text style={{ ...theme.getTextStyle('caption'), color: theme.colors.error }}>Email already in use</Text>
+            ) : null}
+          </View>
 
           <Input
             label="Password"
@@ -191,6 +250,13 @@ export const RegisterScreen: React.FC<any> = ({ navigation }) => {
             rightIcon={showPassword ? "eye-off" : "eye"}
             onRightIconPress={() => setShowPassword(!showPassword)}
           />
+          <View style={{ marginTop: theme.spacing.xs }}>
+            {passwordStrength === 'empty' ? null : (
+              <Text style={{ ...theme.getTextStyle('caption'), color: passwordStrength === 'strong' ? theme.colors.success : passwordStrength === 'medium' ? theme.colors.accent : theme.colors.error }}>
+                Password strength: {passwordStrength}
+              </Text>
+            )}
+          </View>
 
           <Input
             label="Confirm Password"

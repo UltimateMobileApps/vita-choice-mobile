@@ -53,7 +53,7 @@ export const IngredientDetailScreen: React.FC<any> = ({
         navigation.goBack();
       }
     } catch (error) {
-      showToast('Network error', 'error');
+      showToast(error, 'error');
       navigation.goBack();
     } finally {
       setIsLoading(false);

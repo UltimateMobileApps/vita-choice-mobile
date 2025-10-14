@@ -187,14 +187,6 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
 
             <View style={styles.buttonContainer}>
               <Button
-                title="Cancel"
-                variant="outline"
-                size="large"
-                onPress={() => navigation.goBack()}
-                disabled={isLoading}
-                style={styles.cancelButton}
-              />
-              <Button
                 title={isLoading ? 'Updating...' : 'Update Profile'}
                 variant="primary"
                 size="large"
@@ -215,7 +207,7 @@ export const UpdateProfileScreen: React.FC<any> = ({ navigation }) => {
             <View style={styles.infoRow}>
               <Ionicons name="information-circle" size={20} color={theme.colors.accent} />
               <Text style={styles.infoText}>
-                Your username cannot be changed. If you need to update it, please contact support.
+                Your username and email cannot be changed. If you need to update it, please contact support.
               </Text>
             </View>
           </Card>

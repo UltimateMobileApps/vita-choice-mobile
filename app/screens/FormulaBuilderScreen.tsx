@@ -174,7 +174,7 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
         }
       }
     } catch (error) {
-      showToast('Network error occurred', 'error');
+      showToast(error, 'error');
     } finally {
       setIsSavingFormula(false);
     }
@@ -294,7 +294,7 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
           failedIndexes.push(i);
         }
       } catch (error) {
-        errors[i] = { api: 'Network error' };
+        errors[i] = { api: String(error) || 'Network error' };
         anyError = true;
         failedIndexes.push(i);
       } finally {
@@ -375,7 +375,7 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
         setSubmissionProgress(prev => ({ ...prev, failures: Array.from(new Set([...(prev.failures || []), index])) }));
       }
     } catch (e) {
-      setPendingErrors(prev => ({ ...prev, [index]: { api: 'Network error' } }));
+      setPendingErrors(prev => ({ ...prev, [index]: { api: String(e) || 'Network error' } }));
       setSubmissionProgress(prev => ({ ...prev, failures: Array.from(new Set([...(prev.failures || []), index])) }));
     } finally {
       setIsSubmittingIngredient(false);
@@ -417,7 +417,7 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
         showToast(response.error || 'Failed to load ingredients', 'error');
       }
     } catch (e) {
-      showToast('Network error', 'error');
+      showToast(e, 'error');
     } finally {
       setIsModalLoading(false);
     }
@@ -639,7 +639,7 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
                 key={item.id}
                 item={item}
                 editable={false}
-                onUpdateItem={async (itemId: number, data: any) => {
+                  onUpdateItem={async (itemId: number, data: any) => {
                   try {
                     const response = await apiService.updateFormulaIngredient(formulaId as number, itemId, data as any);
                     if (response.data) {
@@ -649,7 +649,7 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
                       showToast(response.error || 'Failed to update ingredient', 'error');
                     }
                   } catch (e) {
-                    showToast('Network error', 'error');
+                    showToast(e, 'error');
                   }
                 }}
                 onRemoveItem={async (itemId: number) => {
@@ -662,7 +662,7 @@ export const FormulaBuilderScreen: React.FC<FormulaBuilderProps> = ({ navigation
                       showToast(response.error, 'error');
                     }
                   } catch (e) {
-                    showToast('Network error', 'error');
+                    showToast(e, 'error');
                   }
                 }}
               />

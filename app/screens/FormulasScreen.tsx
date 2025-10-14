@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -13,10 +13,20 @@ import {
 } from 'react-native';
 import { ActionMenu, Badge, Button, Card, ConfirmDialog, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
-import { apiService, Formula } from '../../services/api';
+import { apiService, API_BASE_URL, ComplianceSummaryResponse, Formula } from '../../services/api';
+import { downloadFileFromApi, sanitizeDownloadFileName } from '../../services/downloads';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { on } from '../utils/EventBus';
+import { getComplianceBadgeConfig, getComplianceSummaryMessage } from '../../utils/compliance';
+
+type FormulaSortKey = 'recent' | 'created' | 'nameAsc';
+
+const FORMULA_SORT_OPTIONS: Array<{ key: FormulaSortKey; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  { key: 'recent', label: 'Recently Updated', icon: 'time-outline' },
+  { key: 'created', label: 'Recently Created', icon: 'calendar-outline' },
+  { key: 'nameAsc', label: 'Name (A → Z)', icon: 'text-outline' },
+];
 
 export const FormulasScreen: React.FC<any> = ({ navigation }) => {
   const { isGuestUser } = useAuth();
@@ -25,7 +35,151 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
   const [formulas, setFormulas] = useState<Formula[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [sortBy, setSortBy] = useState('recently_updated');
+  const [sortBy, setSortBy] = useState<FormulaSortKey>('recent');
+  const [sortMenuVisible, setSortMenuVisible] = useState(false);
+  const [complianceSummaries, setComplianceSummaries] = useState<Record<number, ComplianceSummaryResponse | null | undefined>>({});
+  const [isComplianceLoading, setIsComplianceLoading] = useState(false);
+  const complianceFetchIdRef = useRef(0);
+  const hasShownComplianceSummaryErrorRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      complianceFetchIdRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isGuestUser) {
+      setComplianceSummaries({});
+      setIsComplianceLoading(false);
+    }
+  }, [isGuestUser]);
+
+  const sortedFormulas = useMemo(() => {
+    const copy = [...formulas];
+
+    const getTime = (value: string) => new Date(value ?? 0).getTime();
+
+    copy.sort((a, b) => {
+      switch (sortBy) {
+        case 'created':
+          return getTime(b.created_at) - getTime(a.created_at);
+        case 'nameAsc':
+          return (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' });
+        case 'recent':
+        default:
+          return getTime(b.updated_at) - getTime(a.updated_at);
+      }
+    });
+
+    return copy;
+  }, [formulas, sortBy]);
+
+  const currentSortLabel = useMemo(() => {
+    const match = FORMULA_SORT_OPTIONS.find(option => option.key === sortBy);
+    return match?.label ?? 'Sort';
+  }, [sortBy]);
+
+  const loadComplianceSummaries = useCallback(async (formulaList: Formula[]) => {
+    if (isGuestUser) {
+      setComplianceSummaries({});
+      setIsComplianceLoading(false);
+      return;
+    }
+
+    if (!formulaList.length) {
+      setComplianceSummaries({});
+      setIsComplianceLoading(false);
+      return;
+    }
+
+    const fetchId = ++complianceFetchIdRef.current;
+    setIsComplianceLoading(true);
+
+    setComplianceSummaries(() => {
+      const initial: Record<number, undefined> = {};
+      formulaList.forEach(formula => {
+        initial[formula.id] = undefined;
+      });
+      return initial;
+    });
+
+    const responses = await Promise.allSettled(
+      formulaList.map((formula) => apiService.getComplianceSummary(formula.id))
+    );
+
+    if (complianceFetchIdRef.current !== fetchId) {
+      // A newer fetch was kicked off; ignore this one
+      return;
+    }
+
+    const nextSummaries: Record<number, ComplianceSummaryResponse | null> = {};
+    let failureCount = 0;
+
+    responses.forEach((result, index) => {
+      const formulaId = formulaList[index].id;
+      if (result.status === 'fulfilled') {
+        const response = result.value;
+        if (response.data) {
+          nextSummaries[formulaId] = response.data;
+        } else {
+          nextSummaries[formulaId] = null;
+          failureCount += 1;
+          if (response.error) {
+            console.warn(`Compliance summary error for formula ${formulaId}:`, response.error);
+          }
+        }
+      } else {
+        nextSummaries[formulaId] = null;
+        failureCount += 1;
+        console.warn(`Compliance summary request failed for formula ${formulaId}:`, result.reason);
+      }
+    });
+
+    setComplianceSummaries(nextSummaries);
+    setIsComplianceLoading(false);
+
+    if (failureCount === 0) {
+      hasShownComplianceSummaryErrorRef.current = false;
+    } else if (!hasShownComplianceSummaryErrorRef.current) {
+      showToast('Some compliance summaries could not be loaded', 'warning');
+      hasShownComplianceSummaryErrorRef.current = true;
+    }
+  }, [isGuestUser, showToast]);
+
+  const refreshComplianceSummary = useCallback(async (formulaId: number) => {
+    if (isGuestUser) {
+      return;
+    }
+
+    setComplianceSummaries(prev => ({
+      ...prev,
+      [formulaId]: undefined,
+    }));
+
+    try {
+      const response = await apiService.getComplianceSummary(formulaId);
+      setComplianceSummaries(prev => ({
+        ...prev,
+        [formulaId]: response.data ?? null,
+      }));
+
+      if (response.data) {
+        hasShownComplianceSummaryErrorRef.current = false;
+      }
+
+      if (!response.data && response.error && !hasShownComplianceSummaryErrorRef.current) {
+        showToast(response.error, 'warning');
+        hasShownComplianceSummaryErrorRef.current = true;
+      }
+    } catch (error) {
+      console.error('Failed to refresh compliance summary', error);
+      setComplianceSummaries(prev => ({
+        ...prev,
+        [formulaId]: null,
+      }));
+    }
+  }, [isGuestUser, showToast]);
 
   const loadFormulas = useCallback(async () => {
     // Don't load formulas for guest users
@@ -45,19 +199,22 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
           ingredients: f.items ?? f.ingredients ?? [],
         }));
         setFormulas(normalized);
+        loadComplianceSummaries(normalized);
       } else if (!response.isAuthError) {
         showToast(response.error || 'Failed to load formulas', 'error');
+        setComplianceSummaries({});
       }
     } catch (error) {
-      showToast('Network error', 'error');
+      showToast(error, 'error');
     } finally {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [showToast, isGuestUser]);
+  }, [showToast, isGuestUser, loadComplianceSummaries]);
 
   const [menuVisible, setMenuVisible] = useState(false);
   const [menuTargetFormula, setMenuTargetFormula] = useState<Formula | null>(null);
+  const [exportingFormulaId, setExportingFormulaId] = useState<number | null>(null);
   const [confirmState, setConfirmState] = useState<{ visible: boolean; title?: string; message?: string; onConfirm?: () => void }>({ visible: false });
 
   const onRefresh = useCallback(async () => {
@@ -77,6 +234,7 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
     const offCreate = on('formula:created', (payload) => {
       const newFormula = { ...payload, ingredients: payload.items ?? payload.ingredients ?? [] } as Formula;
       setFormulas(prev => [newFormula, ...prev]);
+      void refreshComplianceSummary(newFormula.id);
     });
 
     const offIngredient = on('formula:ingredient_added', (payload) => {
@@ -88,13 +246,23 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
         }
         return f;
       }));
+      if (typeof payload?.formulaId === 'number') {
+        void refreshComplianceSummary(payload.formulaId);
+      }
+    });
+
+    const offComplianceChecked = on('formula:compliance_checked', (payload) => {
+      if (typeof payload?.formulaId === 'number') {
+        void refreshComplianceSummary(payload.formulaId);
+      }
     });
 
     return () => {
       offCreate();
       offIngredient();
+      offComplianceChecked();
     };
-  }, []);
+  }, [refreshComplianceSummary]);
 
   const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
@@ -106,14 +274,6 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
     const diffInDays = Math.floor(diffInHours / 24);
     if (diffInDays < 7) return `${diffInDays} days ago`;
     return date.toLocaleDateString();
-  };
-
-  const getComplianceStatus = (formula: Formula) => {
-    const ingredientCount = (formula as any).ingredient_count ?? formula.ingredients?.length ?? 0;
-    if (ingredientCount === 0) return { status: 'EMPTY', variant: 'neutral' as const };
-    if (ingredientCount > 10) return { status: 'STOP', variant: 'error' as const };
-    if (ingredientCount > 5) return { status: 'WARNING', variant: 'warning' as const };
-    return { status: 'APPROVED', variant: 'success' as const };
   };
 
   const normalizeDoseValue = (value: number | string | null | undefined): number => {
@@ -150,6 +310,24 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
     }, 0);
   };
 
+  const getIngredientCount = (formula: Formula): number => {
+    const fromMeta = (formula as any).total_ingredients
+      ?? (formula as any).ingredient_count
+      ?? (formula as any).ingredients_count
+      ?? (formula as any).ingredientCount;
+
+    if (typeof fromMeta === 'number' && Number.isFinite(fromMeta)) {
+      return fromMeta;
+    }
+
+    const items = (formula as any).items ?? formula.ingredients;
+    if (Array.isArray(items)) {
+      return items.length;
+    }
+
+    return 0;
+  };
+
   const handleDeleteFormula = (formula: Formula) => {
     setConfirmState({
       visible: true,
@@ -166,7 +344,7 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
             showToast(response.error || 'Failed to delete formula', 'error');
           }
         } catch (error) {
-          showToast('Network error', 'error');
+          showToast(error, 'error');
         }
       },
     });
@@ -182,9 +360,34 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
         showToast(response.error || 'Failed to duplicate formula', 'error');
       }
     } catch (error) {
-      showToast('Network error', 'error');
+      showToast(error, 'error');
     }
   };
+
+  const handleExportFormula = useCallback(async (formula: Formula) => {
+    if (exportingFormulaId) {
+      showToast('Already preparing an export…', 'info');
+      return;
+    }
+
+    setMenuVisible(false);
+    setExportingFormulaId(formula.id);
+
+    try {
+      const baseName = sanitizeDownloadFileName(formula.name ?? `formula-${formula.id}`);
+      const fileName = `${baseName || `formula-${formula.id}`}-compliance-summary.pdf`;
+      const endpoint = `${API_BASE_URL}/formulas/${formula.id}/export_summary/`;
+      await downloadFileFromApi(endpoint, {
+        fileName,
+        mimeType: 'application/pdf',
+      });
+  showToast('Summary saved and ready to share.', 'success');
+    } catch (error) {
+      showToast(error, 'error');
+    } finally {
+      setExportingFormulaId(null);
+    }
+  }, [exportingFormulaId, showToast]);
 
   const handleFormulaOptions = (formula: Formula) => {
     setMenuTargetFormula(formula);
@@ -192,8 +395,27 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const renderFormula = ({ item }: { item: Formula }) => {
-    const compliance = getComplianceStatus(item);
-    const totalWeight = getTotalWeight(item);
+    const summary = complianceSummaries[item.id];
+    const badgeConfig = getComplianceBadgeConfig(summary, { isLoading: isComplianceLoading });
+
+    const summaryMessage = getComplianceSummaryMessage(summary, { isLoading: isComplianceLoading });
+    let complianceSummaryDisplay: { text: string; style: any } | null = null;
+
+    if (summaryMessage) {
+      const styleByKind = {
+        ready: styles.complianceSummaryText,
+        hint: styles.complianceSummaryHintText,
+        error: styles.complianceSummaryUnavailableText,
+      } as const;
+
+      complianceSummaryDisplay = {
+        text: summaryMessage.message,
+        style: styleByKind[summaryMessage.kind],
+      };
+    }
+
+  const totalWeight = getTotalWeight(item);
+  const ingredientCount = getIngredientCount(item);
 
     return (
       <Card
@@ -207,8 +429,8 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
               <Badge variant="info" size="small">
                 {item.region}
               </Badge>
-              <Badge variant={compliance.variant} size="small" style={styles.complianceBadge}>
-                {compliance.status}
+              <Badge variant={badgeConfig.variant} size="small" style={styles.complianceBadge}>
+                {badgeConfig.label}
               </Badge>
             </View>
           </View>
@@ -227,13 +449,17 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
             <View style={styles.formulaStats}>
           <View style={styles.statItem}>
             <Ionicons name="flask" size={16} color={theme.colors.accent} />
-            <Text style={styles.statText}>{(item as any).ingredient_count ?? item.ingredients?.length ?? 0} ingredients</Text>
+            <Text style={styles.statText}>{ingredientCount} ingredients</Text>
           </View>
           <View style={styles.statItem}>
             <Ionicons name="scale" size={16} color={theme.colors.accent} />
             <Text style={styles.statText}>{( (item as any).total_weight_mg ?? totalWeight ).toFixed(0)} mg</Text>
           </View>
         </View>
+
+            {complianceSummaryDisplay && (
+              <Text style={complianceSummaryDisplay.style}>{complianceSummaryDisplay.text}</Text>
+            )}
         
         <View style={styles.formulaFooter}>
           <Text style={styles.updateTime}>
@@ -250,9 +476,10 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
         <Text style={styles.title}>My Formulas</Text>
         <TouchableOpacity
           style={styles.sortButton}
-          onPress={() => showToast('Sort options coming soon!', 'info')}
+          onPress={() => setSortMenuVisible(true)}
         >
-          <Ionicons name="funnel" size={24} color={theme.colors.accent} />
+          <Ionicons name="swap-vertical" size={22} color={theme.colors.accent} />
+          <Text style={styles.sortButtonText}>{currentSortLabel}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -333,7 +560,7 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
       ) : (
         <>
           <FlatList
-            data={formulas}
+            data={sortedFormulas}
             renderItem={renderFormula}
             keyExtractor={(item) => item.id.toString()}
             ListHeaderComponent={renderHeader}
@@ -349,14 +576,35 @@ export const FormulasScreen: React.FC<any> = ({ navigation }) => {
         </>
       )}
       <ActionMenu
+        visible={sortMenuVisible}
+        title="Sort formulas"
+        items={FORMULA_SORT_OPTIONS.map(option => ({
+          label: option.label,
+          icon: option.key === sortBy ? 'checkmark' : option.icon,
+          onPress: () => setSortBy(option.key),
+        }))}
+        onRequestClose={() => setSortMenuVisible(false)}
+      />
+
+      <ActionMenu
         visible={menuVisible}
         title={menuTargetFormula?.name}
         items={[
           { label: 'View Details', icon: 'document-text-outline', onPress: () => { setMenuVisible(false); navigation.navigate('FormulaDetail', { formulaId: menuTargetFormula?.id }); } },
           { label: 'Edit', icon: 'create-outline', onPress: () => { setMenuVisible(false); navigation.navigate('FormulaBuilder', { formulaId: menuTargetFormula?.id, initialName: menuTargetFormula?.name, initialDescription: menuTargetFormula?.description ?? '' }); } },
           { label: 'Duplicate', icon: 'copy-outline', onPress: () => { setMenuVisible(false); menuTargetFormula && handleDuplicateFormula(menuTargetFormula); } },
-          { label: 'Check Compliance', icon: 'checkmark-done-outline', onPress: () => { setMenuVisible(false); showToast('Compliance check coming soon!', 'info'); } },
-          { label: 'Export', icon: 'share-outline', onPress: () => { setMenuVisible(false); showToast('Export feature coming soon!', 'info'); } },
+          { label: 'Check Compliance', icon: 'checkmark-done-outline', onPress: () => { setMenuVisible(false); if (menuTargetFormula) { navigation.navigate('ComplianceResults', { formulaId: menuTargetFormula.id, region: menuTargetFormula.region }); } } },
+          {
+            label: exportingFormulaId === menuTargetFormula?.id ? 'Preparing export…' : 'Export Summary',
+            icon: exportingFormulaId === menuTargetFormula?.id ? 'time-outline' : 'share-outline',
+            onPress: () => {
+              if (menuTargetFormula) {
+                void handleExportFormula(menuTargetFormula);
+              } else {
+                showToast('No formula selected for export.', 'error');
+              }
+            },
+          },
           { label: 'Delete', icon: 'trash-outline', destructive: true, onPress: () => { setMenuVisible(false); menuTargetFormula && handleDeleteFormula(menuTargetFormula); } },
         ]}
         onRequestClose={() => setMenuVisible(false)}
@@ -398,7 +646,17 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
   },
   sortButton: {
-    padding: theme.spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  sortButtonText: {
+    ...theme.getTextStyle('bodySmall'),
+    color: theme.colors.textSecondary,
   },
   formulaCard: {
     marginHorizontal: theme.spacing.screenPadding,
@@ -439,6 +697,22 @@ const styles = StyleSheet.create({
   formulaStats: {
     flexDirection: 'row',
     marginBottom: theme.spacing.md,
+  },
+  complianceSummaryText: {
+    ...theme.getTextStyle('bodySmall'),
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
+  },
+  complianceSummaryHintText: {
+    ...theme.getTextStyle('bodySmall'),
+    color: theme.colors.textMuted,
+    marginBottom: theme.spacing.sm,
+    fontStyle: 'italic',
+  },
+  complianceSummaryUnavailableText: {
+    ...theme.getTextStyle('bodySmall'),
+    color: theme.colors.error,
+    marginBottom: theme.spacing.sm,
   },
   statItem: {
     flexDirection: 'row',

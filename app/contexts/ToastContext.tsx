@@ -11,8 +11,9 @@ interface ToastData {
 }
 
 interface ToastContextType {
-  showToast: (message: string, type?: ToastData['type'], duration?: number) => void;
-  showPersistentToast: (message: string, type?: ToastData['type']) => string;
+  // message can be a string or any error-like object; we will normalize it
+  showToast: (message: string | unknown, type?: ToastData['type'], duration?: number) => void;
+  showPersistentToast: (message: string | unknown, type?: ToastData['type']) => string;
   hideToast: (id: string) => void;
   clearAllToasts: () => void;
   toasts: ToastData[];
@@ -45,7 +46,58 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, []);
 
-  const showToast = (message: string, type: ToastData['type'] = 'info', duration?: number) => {
+  const formatErrorLike = (input: unknown): string => {
+    try {
+      // If it's a string, return it
+      if (typeof input === 'string') return input;
+
+      // If it's an Error instance
+      if (input instanceof Error) {
+        // Try to include extra context if present (e.g., fetch/axios style)
+        const anyErr = input as any;
+        if (anyErr.response && anyErr.response.status) {
+          const status = anyErr.response.status;
+          const url = anyErr.config?.url || anyErr.response.config?.url || '';
+          const serverMsg = anyErr.response.data?.detail || anyErr.response.data?.message || anyErr.message;
+          return `${url ? url + ' - ' : ''}Error ${status}: ${serverMsg || anyErr.message}`;
+        }
+        return input.message;
+      }
+
+      // If it's an object with an 'error' or 'message' field, prefer those
+      if (typeof input === 'object' && input !== null) {
+        const anyObj = input as any;
+        if (typeof anyObj.error === 'string') return anyObj.error;
+        if (typeof anyObj.message === 'string') return anyObj.message;
+        if (anyObj.detail) return String(anyObj.detail);
+        // If it's an ApiResponse-like object { error: '...' }
+        if (anyObj?.error) return String(anyObj.error);
+        // If it contains method/endpoint info
+        if (anyObj.method || anyObj.endpoint || anyObj.url) {
+          const method = anyObj.method ? String(anyObj.method).toUpperCase() + ' ' : '';
+          const url = anyObj.endpoint || anyObj.url || '';
+          const status = anyObj.status ? ` (${anyObj.status})` : '';
+          const msg = anyObj.message || anyObj.error || anyObj.detail || '';
+          return `${method}${url}${status}${msg ? ': ' + msg : ''}`;
+        }
+
+        // Fallback: stringify small objects
+        try {
+          const str = JSON.stringify(anyObj);
+          return str.length > 0 ? str : 'An error occurred';
+        } catch (e) {
+          return 'An error occurred';
+        }
+      }
+
+      return String(input ?? 'An error occurred');
+    } catch (e) {
+      return 'An error occurred';
+    }
+  };
+
+  const showToast = (message: string | unknown, type: ToastData['type'] = 'info', duration?: number) => {
+    const normalized = formatErrorLike(message);
     // Set longer duration for error messages, shorter for success
     const defaultDuration = type === 'error' ? 5000 : type === 'success' ? 2000 : 3000;
     const finalDuration = duration ?? defaultDuration;
@@ -55,7 +107,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const id = `toast-${Date.now()}-${toastIdCounter}-${Math.random().toString(36).substr(2, 5)}`;
     const newToast: ToastData = {
       id,
-      message,
+      message: normalized,
       type,
       duration: finalDuration,
     };
@@ -71,13 +123,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     newToast.timeoutId = timeoutId;
   };
 
-  const showPersistentToast = (message: string, type: ToastData['type'] = 'info'): string => {
+  const showPersistentToast = (message: string | unknown, type: ToastData['type'] = 'info'): string => {
     // Generate a truly unique ID using timestamp + counter + random
     toastIdCounter += 1;
     const id = `toast-persistent-${Date.now()}-${toastIdCounter}-${Math.random().toString(36).substr(2, 5)}`;
     const newToast: ToastData = {
       id,
-      message,
+      message: formatErrorLike(message),
       type,
       duration: undefined, // No auto-hide
     };

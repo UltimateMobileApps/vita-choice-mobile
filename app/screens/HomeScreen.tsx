@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   RefreshControl,
   ScrollView,
@@ -13,10 +13,11 @@ import {
 } from 'react-native';
 import { Badge, Button, Card, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
-import { apiService, Formula } from '../../services/api';
+import { apiService, ComplianceSummaryResponse, Formula } from '../../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { on } from '../utils/EventBus';
+import { computeComplianceCounters, getComplianceBadgeConfig, getComplianceSummaryMessage } from '../../utils/compliance';
 
 interface HomeScreenProps {
   navigation: any;
@@ -27,6 +28,7 @@ interface Stats {
   approved: number;
   warning: number;
   risk: number;
+  empty: number;
 }
 
 export const HomeScreen: React.FC<any> = ({ navigation }) => {
@@ -39,14 +41,155 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
     approved: 0,
     warning: 0,
     risk: 0,
+    empty: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [complianceSummaries, setComplianceSummaries] = useState<Record<number, ComplianceSummaryResponse | null | undefined>>({});
+  const [isComplianceLoading, setIsComplianceLoading] = useState(false);
+  const complianceFetchIdRef = useRef(0);
+  const hasShownComplianceSummaryErrorRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      complianceFetchIdRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isGuestUser) {
+      setComplianceSummaries({});
+      setIsComplianceLoading(false);
+    }
+  }, [isGuestUser]);
+
+  const loadComplianceSummaries = useCallback(async (formulaList: Formula[]) => {
+    if (isGuestUser) {
+      setComplianceSummaries({});
+      setIsComplianceLoading(false);
+      return;
+    }
+
+    if (!formulaList.length) {
+      setComplianceSummaries({});
+      setIsComplianceLoading(false);
+      return;
+    }
+
+    const fetchId = ++complianceFetchIdRef.current;
+    setIsComplianceLoading(true);
+
+    setComplianceSummaries(() => {
+      const initial: Record<number, undefined> = {};
+      formulaList.forEach(formula => {
+        initial[formula.id] = undefined;
+      });
+      return initial;
+    });
+
+    const responses = await Promise.allSettled(
+      formulaList.map((formula) => apiService.getComplianceSummary(formula.id))
+    );
+
+    if (complianceFetchIdRef.current !== fetchId) {
+      return;
+    }
+
+    const nextSummaries: Record<number, ComplianceSummaryResponse | null> = {};
+    let failureCount = 0;
+
+    responses.forEach((result, index) => {
+      const formulaId = formulaList[index].id;
+      if (result.status === 'fulfilled') {
+        const response = result.value;
+        if (response.data) {
+          nextSummaries[formulaId] = response.data;
+        } else {
+          nextSummaries[formulaId] = null;
+          failureCount += 1;
+          if (response.error) {
+            console.warn(`Compliance summary error for formula ${formulaId}:`, response.error);
+          }
+        }
+      } else {
+        nextSummaries[formulaId] = null;
+        failureCount += 1;
+        console.warn(`Compliance summary request failed for formula ${formulaId}:`, result.reason);
+      }
+    });
+
+    setComplianceSummaries(nextSummaries);
+    setIsComplianceLoading(false);
+
+    if (failureCount === 0) {
+      hasShownComplianceSummaryErrorRef.current = false;
+    } else if (!hasShownComplianceSummaryErrorRef.current) {
+      showToast('Some compliance summaries could not be loaded', 'warning');
+      hasShownComplianceSummaryErrorRef.current = true;
+    }
+  }, [isGuestUser, showToast]);
+
+  const refreshComplianceSummary = useCallback(async (formulaId: number) => {
+    if (isGuestUser) {
+      return;
+    }
+
+    setComplianceSummaries(prev => ({
+      ...prev,
+      [formulaId]: undefined,
+    }));
+
+    try {
+      const response = await apiService.getComplianceSummary(formulaId);
+      setComplianceSummaries(prev => ({
+        ...prev,
+        [formulaId]: response.data ?? null,
+      }));
+
+      if (response.data) {
+        hasShownComplianceSummaryErrorRef.current = false;
+      }
+
+      if (!response.data && response.error && !hasShownComplianceSummaryErrorRef.current) {
+        showToast(response.error, 'warning');
+        hasShownComplianceSummaryErrorRef.current = true;
+      }
+    } catch (error) {
+      console.error('Failed to refresh compliance summary', error);
+      setComplianceSummaries(prev => ({
+        ...prev,
+        [formulaId]: null,
+      }));
+    }
+  }, [isGuestUser, showToast]);
+
+  useEffect(() => {
+    if (isGuestUser) {
+      setStats({
+        totalFormulas: 0,
+        approved: 0,
+        warning: 0,
+        risk: 0,
+        empty: 0,
+      });
+      return;
+    }
+
+    const counters = computeComplianceCounters(complianceSummaries);
+    setStats({
+      totalFormulas: formulas.length,
+      approved: counters.approved,
+      warning: counters.warning,
+      risk: counters.stop,
+      empty: counters.empty,
+    });
+  }, [complianceSummaries, formulas.length, isGuestUser]);
 
   const loadData = useCallback(async () => {
     // Don't load formulas for guest users
     if (isGuestUser) {
       setIsLoading(false);
+      setComplianceSummaries({});
       return;
     }
 
@@ -59,16 +202,18 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
           ingredients: f.items ?? f.ingredients ?? [],
         }));
         setFormulas(normalized);
-        calculateStats(normalized);
+        loadComplianceSummaries(normalized);
       } else if (!response.isAuthError) {
         showToast(response.error || 'Failed to load formulas', 'error');
+        setComplianceSummaries({});
       }
     } catch (error) {
-      showToast('Network error', 'error');
+      showToast(error, 'error');
+      setComplianceSummaries({});
     } finally {
       setIsLoading(false);
     }
-  }, [showToast, isGuestUser]);
+  }, [showToast, isGuestUser, loadComplianceSummaries]);
 
   // Event listeners for immediate updates
   useEffect(() => {
@@ -77,7 +222,7 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
       try {
         const newFormula = { ...payload, ingredients: payload.items ?? payload.ingredients ?? [] } as Formula;
         setFormulas(prev => [newFormula, ...prev]);
-        calculateStats([newFormula, ...formulas]);
+        void refreshComplianceSummary(newFormula.id);
       } catch (e) {
         console.error('Error handling formula:created', e);
       }
@@ -92,30 +237,23 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
         }
         return f;
       }));
+      if (typeof formulaId === 'number') {
+        void refreshComplianceSummary(formulaId);
+      }
+    });
+
+    const offComplianceChecked = on('formula:compliance_checked', (payload) => {
+      if (typeof payload?.formulaId === 'number') {
+        void refreshComplianceSummary(payload.formulaId);
+      }
     });
 
     return () => {
       offCreate();
       offIngredient();
+      offComplianceChecked();
     };
-  }, [formulas]);
-
-  const calculateStats = (formulaList: Formula[]) => {
-    const newStats = {
-      totalFormulas: formulaList.length,
-      approved: 0,
-      warning: 0,
-      risk: 0,
-    };
-
-    // Note: In real implementation, you'd check compliance status
-    // For now, we'll simulate some stats
-    newStats.approved = Math.floor(formulaList.length * 0.7);
-    newStats.warning = Math.floor(formulaList.length * 0.2);
-    newStats.risk = Math.floor(formulaList.length * 0.1);
-
-    setStats(newStats);
-  };
+  }, [refreshComplianceSummary]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -161,15 +299,6 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
     return date.toLocaleDateString();
   };
 
-  const getComplianceStatus = (formula: Formula) => {
-    // Simulate compliance status based on formula data
-    const ingredientCount = formula.ingredients?.length ?? 0;
-    if (ingredientCount === 0) return { status: 'EMPTY', variant: 'neutral' as const };
-    if (ingredientCount > 10) return { status: 'RISK', variant: 'error' as const };
-    if (ingredientCount > 5) return { status: 'WARNING', variant: 'warning' as const };
-    return { status: 'APPROVED', variant: 'success' as const };
-  };
-
   const normalizeDoseValue = (value: number | string | null | undefined): number => {
     if (typeof value === 'number') {
       return Number.isFinite(value) ? value : 0;
@@ -198,6 +327,24 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
 
       return total + doseValue;
     }, 0);
+  };
+
+  const getIngredientCount = (formula: Formula): number => {
+    const fromMeta = (formula as any).total_ingredients
+      ?? (formula as any).ingredient_count
+      ?? (formula as any).ingredients_count
+      ?? (formula as any).ingredientCount;
+
+    if (typeof fromMeta === 'number' && Number.isFinite(fromMeta)) {
+      return fromMeta;
+    }
+
+    const items = (formula as any).items ?? formula.ingredients;
+    if (Array.isArray(items)) {
+      return items.length;
+    }
+
+    return 0;
   };
 
   if (isLoading) {
@@ -284,104 +431,38 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
         {/* Quick Stats Card */}
         {!isGuestUser && (
           <Card style={styles.statsCard}>
-          <Text style={styles.cardTitle}>Your Formulas</Text>
-          <View style={styles.statsGrid}>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{stats.totalFormulas}</Text>
-              <Text style={styles.statLabel}>Total</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statNumber, { color: theme.colors.success }]}>
-                {stats.approved}
-              </Text>
-              <Text style={styles.statLabel}>Approved</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statNumber, { color: theme.colors.warning }]}>
-                {stats.warning}
-              </Text>
-              <Text style={styles.statLabel}>Warning</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statNumber, { color: theme.colors.error }]}>
-                {stats.risk}
-              </Text>
-              <Text style={styles.statLabel}>Risk</Text>
-            </View>
-          </View>
-        </Card>
-        )}
-
-        {/* Recent Formulas */}
-        {!isGuestUser && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Formulas</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Formulas')}>
-              <Text style={styles.viewAllText}>View All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {formulas.length === 0 ? (
-            <Card style={styles.emptyCard}>
-              <View style={styles.emptyState}>
-                <Ionicons name="document-outline" size={48} color={theme.colors.textMuted} />
-                <Text style={styles.emptyTitle}>No formulas yet</Text>
-                <Text style={styles.emptyText}>
-                  Create your first supplement formula to get started
-                </Text>
-                <Button
-                  title="Create Formula"
-                  variant="primary"
-                  size="medium"
-                  onPress={handleCreateFormula}
-                  style={styles.emptyButton}
-                />
+            <Text style={styles.cardTitle}>Your Formulas</Text>
+            <View style={styles.statsGrid}>
+              <View style={styles.statItem}>
+                <Text style={styles.statNumber}>{stats.totalFormulas}</Text>
+                <Text style={styles.statLabel}>Total</Text>
+                {stats.empty > 0 && (
+                  <Text style={styles.statSubLabel}>{stats.empty} empty</Text>
+                )}
               </View>
-            </Card>
-          ) : (
-            formulas.slice(0, 5).map((formula) => {
-              const compliance = getComplianceStatus(formula);
-              const totalWeight = getTotalWeight(formula);
-              
-              return (
-                <Card
-                  key={formula.id}
-                  style={styles.formulaCard}
-                  onPress={() => handleFormulaDetail(formula.id)}
-                >
-                  <View style={styles.formulaHeader}>
-                    <View style={styles.formulaInfo}>
-                      <Text style={styles.formulaName}>{formula.name}</Text>
-                      <Badge variant="info" size="small">
-                        {formula.region}
-                      </Badge>
-                    </View>
-                    <Badge variant={compliance.variant} size="small">
-                      {compliance.status}
-                    </Badge>
-                  </View>
-                  
-                  <Text style={styles.formulaDescription} numberOfLines={2}>
-                    {formula.description || 'No description'}
-                  </Text>
-                  
-                  <View style={styles.formulaStats}>
-                    <Text style={styles.formulaStatText}>
-                      {formula.ingredients?.length ?? 0} ingredients
-                    </Text>
-                    <Text style={styles.formulaStatText}>
-                      {totalWeight.toFixed(0)} mg
-                    </Text>
-                    <Text style={styles.formulaStatText}>
-                      Updated {formatTimeAgo(formula.updated_at)}
-                    </Text>
-                  </View>
-                </Card>
-              );
-            })
-          )}
-        </View>
+              <View style={styles.statItem}>
+                <Text style={[styles.statNumber, { color: theme.colors.success }]}>
+                  {stats.approved}
+                </Text>
+                <Text style={styles.statLabel}>Approved</Text>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={[styles.statNumber, { color: theme.colors.warning }]}>
+                  {stats.warning}
+                </Text>
+                <Text style={styles.statLabel}>Warning</Text>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={[styles.statNumber, { color: theme.colors.error }]}>
+                  {stats.risk}
+                </Text>
+                <Text style={styles.statLabel}>Risk</Text>
+              </View>
+            </View>
+            {isComplianceLoading && (
+              <Text style={styles.statsHint}>Updating compliance summaries…</Text>
+            )}
+          </Card>
         )}
 
         {/* Quick Actions */}
@@ -416,6 +497,99 @@ export const HomeScreen: React.FC<any> = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Recent Formulas */}
+        {!isGuestUser && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent Formulas</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Formulas')}>
+              <Text style={styles.viewAllText}>View All</Text>
+            </TouchableOpacity>
+          </View>
+
+          {formulas.length === 0 ? (
+            <Card style={styles.emptyCard}>
+              <View style={styles.emptyState}>
+                <Ionicons name="document-outline" size={48} color={theme.colors.textMuted} />
+                <Text style={styles.emptyTitle}>No formulas yet</Text>
+                <Text style={styles.emptyText}>
+                  Create your first supplement formula to get started
+                </Text>
+                <Button
+                  title="Create Formula"
+                  variant="primary"
+                  size="medium"
+                  onPress={handleCreateFormula}
+                  style={styles.emptyButton}
+                />
+              </View>
+            </Card>
+          ) : (
+            formulas.slice(0, 5).map((formula) => {
+              const summary = complianceSummaries[formula.id];
+              const badgeConfig = getComplianceBadgeConfig(summary, { isLoading: isComplianceLoading });
+              const summaryMessage = getComplianceSummaryMessage(summary, { isLoading: isComplianceLoading });
+              const totalWeight = getTotalWeight(formula);
+
+              let summaryDisplay: { text: string; style: any } | null = null;
+              if (summaryMessage) {
+                const styleByKind = {
+                  ready: styles.complianceSummaryText,
+                  hint: styles.complianceSummaryHintText,
+                  error: styles.complianceSummaryUnavailableText,
+                } as const;
+                summaryDisplay = {
+                  text: summaryMessage.message,
+                  style: styleByKind[summaryMessage.kind],
+                };
+              }
+              
+              const ingredientCount = getIngredientCount(formula);
+
+              return (
+                <Card
+                  key={formula.id}
+                  style={styles.formulaCard}
+                  onPress={() => handleFormulaDetail(formula.id)}
+                >
+                  <View style={styles.formulaHeader}>
+                    <View style={styles.formulaInfo}>
+                      <Text style={styles.formulaName}>{formula.name}</Text>
+                      <Badge variant="info" size="small">
+                        {formula.region}
+                      </Badge>
+                    </View>
+                    <Badge variant={badgeConfig.variant} size="small">
+                      {badgeConfig.label}
+                    </Badge>
+                  </View>
+                  
+                  <Text style={styles.formulaDescription} numberOfLines={2}>
+                    {formula.description || 'No description'}
+                  </Text>
+
+                  {summaryDisplay && (
+                    <Text style={summaryDisplay.style}>{summaryDisplay.text}</Text>
+                  )}
+                  
+                  <View style={styles.formulaStats}>
+                    <Text style={styles.formulaStatText}>
+                      {ingredientCount} ingredients
+                    </Text>
+                    <Text style={styles.formulaStatText}>
+                      {totalWeight.toFixed(0)} mg
+                    </Text>
+                    <Text style={styles.formulaStatText}>
+                      Updated {formatTimeAgo(formula.updated_at)}
+                    </Text>
+                  </View>
+                </Card>
+              );
+            })
+          )}
+        </View>
+        )}
       </ScrollView>
     </LinearGradient>
   );
@@ -507,6 +681,16 @@ const styles = StyleSheet.create({
     color: theme.colors.textMuted,
     marginTop: theme.spacing.xs,
   },
+  statSubLabel: {
+    ...theme.getTextStyle('caption'),
+    color: theme.colors.textMuted,
+  },
+  statsHint: {
+    ...theme.getTextStyle('bodySmall'),
+    color: theme.colors.textMuted,
+    marginTop: theme.spacing.md,
+    textAlign: 'center',
+  },
   section: {
     paddingHorizontal: theme.spacing.screenPadding,
     marginBottom: theme.spacing.xl,
@@ -570,6 +754,22 @@ const styles = StyleSheet.create({
     ...theme.getTextStyle('body'),
     color: theme.colors.textMuted,
     marginBottom: theme.spacing.md,
+  },
+  complianceSummaryText: {
+    ...theme.getTextStyle('bodySmall'),
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
+  },
+  complianceSummaryHintText: {
+    ...theme.getTextStyle('bodySmall'),
+    color: theme.colors.textMuted,
+    marginBottom: theme.spacing.sm,
+    fontStyle: 'italic',
+  },
+  complianceSummaryUnavailableText: {
+    ...theme.getTextStyle('bodySmall'),
+    color: theme.colors.error,
+    marginBottom: theme.spacing.sm,
   },
   formulaStats: {
     flexDirection: 'row',

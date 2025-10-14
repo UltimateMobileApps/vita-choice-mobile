@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Badge, Button, Card, Input, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Input, LoadingSpinner } from '../../components/ui';
 import { theme } from '../../constants/theme';
 import { apiService, Ingredient } from '../../services/api';
 import { useToast } from '../contexts/ToastContext';
@@ -124,7 +124,7 @@ const IngredientPickerScreen: React.FC<IngredientPickerScreenProps> = ({ navigat
         const pageHasMore = Boolean(next) || (typeof count === 'number' ? targetPage * pageSize < count : results.length === pageSize);
         setHasMore(pageHasMore);
       } catch (error) {
-        showToast('Network error', 'error');
+        showToast(error, 'error');
       } finally {
         setIsLoading(false);
         setIsLoadingMore(false);
@@ -306,7 +306,9 @@ const IngredientPickerScreen: React.FC<IngredientPickerScreenProps> = ({ navigat
       <StatusBar barStyle="light-content" />
 
       {isLoading && ingredients.length === 0 ? (
-        <Skeleton variant="small" lines={1} />
+        <View style={styles.loadingContainer}>
+          <LoadingSpinner size="small" />
+        </View>
       ) : (
         <FlatList
           data={ingredients}
@@ -322,7 +324,7 @@ const IngredientPickerScreen: React.FC<IngredientPickerScreenProps> = ({ navigat
             hasMore ? (
               <View style={styles.footer}>
                 {isLoadingMore ? (
-                  <Skeleton variant="small" lines={1} />
+                  <LoadingSpinner size="small" />
                 ) : (
                   <Button
                     title="Load more"
@@ -438,6 +440,12 @@ const styles = StyleSheet.create({
     ...theme.getTextStyle('body'),
     color: theme.colors.textMuted,
     textAlign: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.xxxl,
   },
 });
 

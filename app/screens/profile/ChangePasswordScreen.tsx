@@ -10,6 +10,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Pressable,
 } from 'react-native';
 import { Button, Card, Input, Skeleton } from '../../../components/ui';
 import { theme } from '../../../constants/theme';
@@ -20,6 +21,8 @@ export const ChangePasswordScreen: React.FC<any> = ({ navigation }) => {
   const { showToast } = useToast();
 
   const [isLoading, setIsLoading] = useState(false);
+  const [logoutAll, setLogoutAll] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
   const [formData, setFormData] = useState({
     old_password: '',
     new_password: '',
@@ -83,7 +86,9 @@ export const ChangePasswordScreen: React.FC<any> = ({ navigation }) => {
       const response = await apiService.changePassword({
         old_password: formData.old_password,
         new_password: formData.new_password,
-      });
+        // pass logout_all to backend (boolean)
+        logout_all: logoutAll,
+      } as any);
 
       if (response.data) {
         showToast('Password changed successfully', 'success');
@@ -259,15 +264,38 @@ export const ChangePasswordScreen: React.FC<any> = ({ navigation }) => {
               </View>
             </View>
 
+            {/* Logout all sessions option */}
+            <View style={styles.checkboxRow}>
+              <TouchableOpacity
+                onPress={() => setLogoutAll(prev => !prev)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: logoutAll }}
+                style={styles.checkboxTouch}
+              >
+                <View style={[styles.checkboxBox, logoutAll && { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }]}>
+                  {logoutAll ? <Ionicons name="checkmark" size={14} color={theme.colors.textPrimary} /> : null}
+                </View>
+                <Text style={styles.checkboxLabel}>Logout of all sessions</Text>
+              </TouchableOpacity>
+
+              <Pressable
+                onPress={() => setShowTooltip(prev => !prev)}
+                onHoverIn={() => setShowTooltip(true)}
+                onHoverOut={() => setShowTooltip(false)}
+                onLongPress={() => setShowTooltip(prev => !prev)}
+                style={styles.infoTouch}
+              >
+                <Ionicons name="information-circle" size={18} color={theme.colors.textMuted} />
+              </Pressable>
+
+              {showTooltip && (
+                <View style={styles.tooltipContainer}>
+                  <Text style={styles.tooltipText}>Also signs out other devices and sessions. Default is off.</Text>
+                </View>
+              )}
+            </View>
+
             <View style={styles.buttonContainer}>
-              <Button
-                title="Cancel"
-                variant="outline"
-                size="large"
-                onPress={() => navigation.goBack()}
-                disabled={isLoading}
-                style={styles.cancelButton}
-              />
               <Button
                 title={isLoading ? 'Changing...' : 'Change Password'}
                 variant="primary"
@@ -283,8 +311,6 @@ export const ChangePasswordScreen: React.FC<any> = ({ navigation }) => {
                 <Skeleton />
               </View>
             )}
-          </View>
-
           <Card style={styles.infoCard}>
             <View style={styles.infoRow}>
               <Ionicons name="shield-checkmark" size={20} color={theme.colors.accent} />
@@ -293,6 +319,7 @@ export const ChangePasswordScreen: React.FC<any> = ({ navigation }) => {
               </Text>
             </View>
           </Card>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </LinearGradient>
@@ -419,6 +446,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.25)',
     borderRadius: theme.borderRadius.md,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.screenPadding,
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
+  },
+  checkboxTouch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkboxBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: theme.spacing.sm,
+    backgroundColor: 'transparent',
+  },
+  checkboxLabel: {
+    ...theme.getTextStyle('body'),
+    color: theme.colors.textPrimary,
+  },
+  infoTouch: {
+    marginLeft: theme.spacing.sm,
+    padding: 6,
+  },
+  tooltipContainer: {
+    position: 'absolute',
+    top: -36,
+    right: theme.spacing.screenPadding,
+    backgroundColor: '#111',
+    padding: theme.spacing.sm,
+    borderRadius: theme.borderRadius.sm,
+    zIndex: 20,
+    maxWidth: 260,
+  },
+  tooltipText: {
+    ...theme.getTextStyle('caption'),
+    color: '#fff',
   },
 });
 

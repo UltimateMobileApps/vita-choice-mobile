@@ -34,6 +34,7 @@ export const Input: React.FC<InputProps> = ({
   ...props
 }) => {
   const [isFocused, setIsFocused] = useState(false);
+  const [cursorVisible, setCursorVisible] = useState(true);
   const animatedBorder = useRef(new Animated.Value(0)).current;
 
   const handleFocus = () => {
@@ -118,7 +119,12 @@ export const Input: React.FC<InputProps> = ({
             <Ionicons
               name={rightIcon}
               size={20}
-              color={isFocused ? theme.colors.accent : theme.colors.textMuted}
+            cursorColor={cursorVisible ? theme.colors.accent : 'transparent'}
+            onSelectionChange={() => {
+              if (Platform.OS === 'android' && !isFocused) {
+                setCursorVisible(false);
+              }
+            }}
             />
           </TouchableOpacity>
         )}

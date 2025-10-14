@@ -3,12 +3,13 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Linking,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Badge, Button, Card, ConfirmDialog, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
@@ -95,6 +96,19 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
     navigation.navigate('ChangePassword');
   };
 
+  const openExternalLink = useCallback(async (url: string, label: string) => {
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        showToast(`Unable to open ${label}`, 'error');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (error) {
+      showToast(error, 'error');
+    }
+  }, [showToast]);
+
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Unknown';
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -102,6 +116,36 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
       month: 'long',
       day: 'numeric',
     });
+  };
+
+  const formatJoinedDate = (dateString?: string) => {
+    // Prefer user.date_joined (ISO string). Fallback to stats.accountCreated if not provided.
+    const ds = dateString || stats.accountCreated;
+    if (!ds) return 'Unknown';
+
+    const d = new Date(ds);
+    if (isNaN(d.getTime())) return 'Unknown';
+
+    // formatted e.g. January 2, 2024
+    const formatted = d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    // relative time (e.g., "2 years ago") using Intl.RelativeTimeFormat where available
+    const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    const months = Math.floor(days / 30);
+    const years = Math.floor(days / 365);
+
+    let relative = '';
+    if (years >= 1) relative = `${years} year${years > 1 ? 's' : ''} ago`;
+    else if (months >= 1) relative = `${months} month${months > 1 ? 's' : ''} ago`;
+    else if (days >= 1) relative = `${days} day${days > 1 ? 's' : ''} ago`;
+    else if (hours >= 1) relative = `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    else if (minutes >= 1) relative = `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    else relative = `Just now`;
+
+    return `${formatted} • ${relative}`;
   };
 
   const getInitials = (firstName?: string, lastName?: string, username?: string) => {
@@ -167,9 +211,6 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
                     : user?.username
                 }
               </Text>
-              <Text style={styles.username}>
-                {isGuestUser ? '@guest' : `@${user?.username}`}
-              </Text>
               <Text style={styles.email}>
                 {isGuestUser ? 'Limited access - Create account for full features' : user?.email}
               </Text>
@@ -217,7 +258,7 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
                 <View style={styles.statItem}>
                   <Ionicons name="calendar" size={24} color={theme.colors.accent} />
                   <View style={styles.statInfo}>
-                    <Text style={styles.statValue}>Member since</Text>
+                    <Text style={[styles.statValue, styles.statValueSmall]}>{formatJoinedDate(user?.date_joined)}</Text>
                     <Text style={styles.statLabel}>Account created</Text>
                   </View>
                 </View>
@@ -292,48 +333,13 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
           </TouchableOpacity>
         </Card>
 
-        {/* App Settings */}
-        <Card style={styles.settingsCard}>
-          <Text style={styles.cardTitle}>App Settings</Text>
-          
-          <TouchableOpacity 
-            style={styles.actionItem} 
-            onPress={() => showToast('Notifications settings coming soon!', 'info')}
-          >
-            <View style={styles.actionLeft}>
-              <Ionicons name="notifications" size={24} color={theme.colors.textMuted} />
-              <Text style={[styles.actionText, { color: theme.colors.textMuted }]}>
-                Notifications
-              </Text>
-            </View>
-            <Badge variant="neutral" size="small">
-              Soon
-            </Badge>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.actionItem} 
-            onPress={() => showToast('Dark mode coming soon!', 'info')}
-          >
-            <View style={styles.actionLeft}>
-              <Ionicons name="moon" size={24} color={theme.colors.textMuted} />
-              <Text style={[styles.actionText, { color: theme.colors.textMuted }]}>
-                Dark Mode
-              </Text>
-            </View>
-            <Badge variant="neutral" size="small">
-              Soon
-            </Badge>
-          </TouchableOpacity>
-        </Card>
-
         {/* Support */}
         <Card style={styles.supportCard}>
           <Text style={styles.cardTitle}>Support</Text>
           
           <TouchableOpacity 
             style={styles.actionItem} 
-            onPress={() => showToast('Help center coming soon!', 'info')}
+            onPress={() => openExternalLink('https://thevitachoice.com/faq', 'Help Center')}
           >
             <View style={styles.actionLeft}>
               <Ionicons name="help-circle" size={24} color={theme.colors.accent} />
@@ -344,18 +350,7 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
 
           <TouchableOpacity 
             style={styles.actionItem} 
-            onPress={() => showToast('Documentation coming soon!', 'info')}
-          >
-            <View style={styles.actionLeft}>
-              <Ionicons name="book" size={24} color={theme.colors.accent} />
-              <Text style={styles.actionText}>API Documentation</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.actionItem} 
-            onPress={() => showToast('Report issue coming soon!', 'info')}
+            onPress={() => openExternalLink('https://thevitachoice.com/support', 'Support')}
           >
             <View style={styles.actionLeft}>
               <Ionicons name="bug" size={24} color={theme.colors.accent} />
@@ -371,7 +366,7 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
           
           <TouchableOpacity 
             style={styles.actionItem} 
-            onPress={() => showToast('Terms of service coming soon!', 'info')}
+            onPress={() => openExternalLink('https://thevitachoice.com/terms', 'Terms of Service')}
           >
             <View style={styles.actionLeft}>
               <Ionicons name="document" size={24} color={theme.colors.textMuted} />
@@ -382,7 +377,7 @@ export const ProfileScreen: React.FC<any> = ({ navigation }) => {
 
           <TouchableOpacity 
             style={styles.actionItem} 
-            onPress={() => showToast('Privacy policy coming soon!', 'info')}
+            onPress={() => openExternalLink('https://thevitachoice.com/privacy', 'Privacy Policy')}
           >
             <View style={styles.actionLeft}>
               <Ionicons name="shield-checkmark" size={24} color={theme.colors.textMuted} />
@@ -505,6 +500,11 @@ const styles = StyleSheet.create({
   },
   statValue: {
     ...theme.getTextStyle('h5', 'semibold'),
+    color: theme.colors.textPrimary,
+  },
+  statValueSmall: {
+    ...theme.getTextStyle('body', 'semibold'),
+    fontSize: 14,
     color: theme.colors.textPrimary,
   },
   statLabel: {

@@ -30,6 +30,7 @@ interface User {
   email: string;
   first_name?: string;
   last_name?: string;
+  date_joined?: string;
 }
 
 interface Ingredient {
@@ -64,22 +65,48 @@ interface FormulaIngredient {
   order?: number;
 }
 
-interface ComplianceResult {
-  formula_id: number;
-  region: string;
-  status: 'APPROVED' | 'WARNING' | 'STOP';
-  status_message: string;
-  issues: ComplianceIssue[];
-  checked_at: string;
+type ComplianceStatus = 'APPROVED' | 'WARNING' | 'STOP' | 'EMPTY';
+
+interface ComplianceSummaryCounts {
+  safe: number;
+  caution: number;
+  risk: number;
+}
+
+interface ComplianceSummaryResponse {
+  status: ComplianceStatus;
+  summary: ComplianceSummaryCounts;
+  total_ingredients?: number;
+  message?: string;
 }
 
 interface ComplianceIssue {
-  ingredient_name: string;
-  dose_value: number;
-  dose_unit: string;
+  ingredient_id?: number;
+  ingredient_name?: string;
+  ingredient: string;
+  dose?: string;
+  dose_value?: number;
+  dose_unit?: string;
+  category?: string;
   severity: 'RISK' | 'CAUTION';
+  level?: 'RISK' | 'CAUTION';
+  safety_info?: string;
   message: string;
-  action: string;
+  action?: string;
+}
+
+interface ComplianceResult {
+  status: 'APPROVED' | 'WARNING' | 'STOP' | 'EMPTY';
+  status_message: string;
+  can_proceed: boolean;
+  formula_id: number;
+  formula_name: string;
+  region: string;
+  total_ingredients: number;
+  total_weight_mg: number;
+  summary: ComplianceSummaryCounts;
+  issues: ComplianceIssue[];
+  checked_at: string;
 }
 
 // Storage keys
@@ -286,9 +313,38 @@ class ApiService {
       }
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return { 
-          error: errorData.detail || errorData.message || `HTTP ${response.status}`,
+        // Try to parse structured error info from the server
+        const errorData = await response.json().catch(() => ({} as any));
+
+        const extractErrorMessage = (d: unknown): string | undefined => {
+          try {
+            const anyd = d as any;
+            if (!anyd) return undefined;
+            if (typeof anyd === 'string') return anyd;
+            if (anyd.detail) return anyd.detail;
+            if (anyd.message) return anyd.message;
+            if (anyd.error) return anyd.error;
+            if (Array.isArray(anyd.non_field_errors)) return anyd.non_field_errors[0];
+            const vals = Object.values(anyd);
+            if (vals.length > 0) {
+              const first = vals[0];
+              if (Array.isArray(first)) return first[0];
+              return String(first);
+            }
+          } catch (e) {
+            // ignore
+          }
+          return undefined;
+        };
+
+        const serverMsg = extractErrorMessage(errorData);
+
+        const method = (options && (options.method as string)) || 'GET';
+        const statusText = (response as any).statusText || '';
+        const baseMsg = `${method.toUpperCase()} ${endpoint} failed (${response.status}${statusText ? ' ' + statusText : ''})`;
+
+        return {
+          error: serverMsg ? `${baseMsg}: ${serverMsg}` : baseMsg,
         };
       }
 
@@ -304,7 +360,13 @@ class ApiService {
         return this.request(endpoint, options, retryCount + 1);
       }
       
-      return { error: error.message || 'Network error. Please check your connection.' };
+      // Include endpoint/method context for network errors as well
+      try {
+        const method = (options && (options.method as string)) || 'GET';
+        return { error: `${method.toUpperCase()} ${endpoint} failed: ${error.message || 'Network error. Please check your connection.'}` };
+      } catch (e) {
+        return { error: error.message || 'Network error. Please check your connection.' };
+      }
     }
   }
 
@@ -585,9 +647,11 @@ class ApiService {
   // Ingredient Methods
   async getIngredients(params?: {
     search?: string;
-    category?: string;
-    source?: string;
+    category?: string | string[];
+    source?: string | string[];
     safety?: string;
+    safety_level?: string;
+    ordering?: string;
     page?: number;
     page_size?: number;
   }): Promise<ApiResponse<{ count: number; results: Ingredient[] }>> {
@@ -595,8 +659,18 @@ class ApiService {
     
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          searchParams.append(key, value.toString());
+        if (value === undefined || value === null) return;
+
+        if (Array.isArray(value)) {
+          value
+            .filter((item) => item !== undefined && item !== null && String(item).length > 0)
+            .forEach((item) => searchParams.append(key, item.toString()));
+          return;
+        }
+
+        const stringValue = value.toString();
+        if (stringValue.length > 0) {
+          searchParams.append(key, stringValue);
         }
       });
     }
@@ -761,28 +835,50 @@ class ApiService {
   }
 
   // Compliance Methods
-  async checkCompliance(formulaId: number, region: string): Promise<ApiResponse<ComplianceResult>> {
-    return this.request<ComplianceResult>(`/formulas/${formulaId}/check-compliance/`, {
-      method: 'POST',
-      body: JSON.stringify({ region }),
+  async getComplianceSummary(formulaId: number): Promise<ApiResponse<ComplianceSummaryResponse>> {
+    return this.request<ComplianceSummaryResponse>(`/formulas/${formulaId}/compliance_summary/`, {
+      method: 'GET',
     });
+  }
+
+  async checkCompliance(
+    formulaId: number,
+    options: { region?: string } = {}
+  ): Promise<ApiResponse<ComplianceResult>> {
+    const { region } = options;
+    const requestInit: RequestInit = {
+      method: 'POST',
+    };
+
+    if (region) {
+      requestInit.body = JSON.stringify({ region });
+    }
+
+    return this.request<ComplianceResult>(`/formulas/${formulaId}/check_compliance/`, requestInit);
   }
 
   // Export Methods
   async exportSupplementLabel(formulaId: number): Promise<ApiResponse<{ download_url: string }>> {
-    return this.request<{ download_url: string }>(`/formulas/${formulaId}/export/label/`);
+    return this.request<{ download_url: string }>(`/formulas/${formulaId}/export_label/`);
   }
 
   async exportFormulaSummary(formulaId: number): Promise<ApiResponse<{ download_url: string }>> {
-    return this.request<{ download_url: string }>(`/formulas/${formulaId}/export/summary/`);
+    return this.request<{ download_url: string }>(`/formulas/${formulaId}/export_summary/`);
   }
 
   async exportFormulaCSV(formulaId: number): Promise<ApiResponse<{ download_url: string }>> {
-    return this.request<{ download_url: string }>(`/formulas/${formulaId}/export/csv/`);
+    return this.request<{ download_url: string }>(`/formulas/${formulaId}/export_csv/`);
   }
 
   async exportAllFormulasCSV(): Promise<ApiResponse<{ download_url: string }>> {
-    return this.request<{ download_url: string }>('/formulas/export/csv/');
+    return this.request<{ download_url: string }>(`/formulas/export_all_csv/`);
+  }
+
+  async getAccessToken(): Promise<string | null> {
+    if (!this.tokens?.access) {
+      await this.loadTokens();
+    }
+    return this.tokens?.access ?? null;
   }
 
   // Utility Methods
@@ -823,7 +919,7 @@ export const apiService = new ApiService();
 // Export types
 export type {
   ApiResponse,
-  AuthTokens, ComplianceIssue, ComplianceResult, Formula,
+  AuthTokens, ComplianceIssue, ComplianceResult, ComplianceStatus, ComplianceSummaryCounts, ComplianceSummaryResponse, Formula,
   FormulaIngredient, Ingredient, User
 };
 

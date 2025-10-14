@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,13 +15,40 @@ import {
 } from 'react-native';
 import { ActionMenu, Badge, Button, Card, ConfirmDialog, Skeleton } from '../../components/ui';
 import { theme } from '../../constants/theme';
-import { apiService, ComplianceResult, Formula } from '../../services/api';
+import { apiService, API_BASE_URL, ComplianceResult, Formula } from '../../services/api';
+import { downloadFileFromApi, sanitizeDownloadFileName } from '../../services/downloads';
 import { useToast } from '../contexts/ToastContext';
+import { on } from '../utils/EventBus';
+
+const complianceCacheKey = (id: number) => `formula_compliance_result_${id}`;
 
 interface FormulaDetailScreenProps {
   navigation: any;
   route: any;
 }
+
+type ExportType = 'supplement' | 'csv' | 'summary';
+
+const EXPORT_CONFIG: Record<ExportType, { toast: string; suffix: string; mimeType: string; path: (formulaId: number) => string }> = {
+  supplement: {
+    toast: 'Supplement label saved and ready to share.',
+    suffix: 'supplement-label.pdf',
+    mimeType: 'application/pdf',
+    path: (id) => `${API_BASE_URL}/formulas/${id}/export_label/`,
+  },
+  csv: {
+    toast: 'Formula CSV saved and ready to share.',
+    suffix: 'formula.csv',
+    mimeType: 'text/csv',
+    path: (id) => `${API_BASE_URL}/formulas/${id}/export_csv/`,
+  },
+  summary: {
+    toast: 'Summary PDF saved and ready to share.',
+    suffix: 'summary.pdf',
+    mimeType: 'application/pdf',
+    path: (id) => `${API_BASE_URL}/formulas/${id}/export_summary/`,
+  },
+};
 
 export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ navigation, route }) => {
   const { showToast } = useToast();
@@ -30,8 +58,8 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
   const [compliance, setCompliance] = useState<ComplianceResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isCheckingCompliance, setIsCheckingCompliance] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [exportInProgress, setExportInProgress] = useState<ExportType | null>(null);
 
   const loadFormula = useCallback(async () => {
     try {
@@ -55,7 +83,7 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
         navigation.goBack();
       }
     } catch (error) {
-      showToast('Network error', 'error');
+      showToast(error, 'error');
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -67,23 +95,27 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
     await loadFormula();
   }, [loadFormula]);
 
-  const checkCompliance = async () => {
-    if (!formula) return;
-
-    setIsCheckingCompliance(true);
+  const loadCachedComplianceResult = useCallback(async () => {
+    if (!formulaId) return;
     try {
-      const response = await apiService.checkCompliance(formula.id, formula.region);
-      if (response.data) {
-        setCompliance(response.data);
-        showToast('Compliance check completed', 'success');
-      } else {
-        showToast(response.error || 'Failed to check compliance', 'error');
+      const stored = await AsyncStorage.getItem(complianceCacheKey(formulaId));
+      if (stored) {
+        const parsed = JSON.parse(stored) as ComplianceResult;
+        setCompliance(parsed);
       }
     } catch (error) {
-      showToast('Network error', 'error');
-    } finally {
-      setIsCheckingCompliance(false);
+      console.warn('Failed to load cached compliance result', error);
     }
+  }, [formulaId]);
+
+  const handleComplianceCheck = () => {
+    if (!formula) return;
+    const ingredientCount = formula.ingredients?.length ?? 0;
+    if (ingredientCount === 0) {
+      showToast('Add at least one ingredient to run a compliance check', 'warning');
+      return;
+    }
+    navigation.navigate('ComplianceResults', { formulaId: formula.id, region: formula.region });
   };
 
   const handleEdit = () => {
@@ -119,7 +151,7 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
         showToast(response.error || 'Failed to duplicate formula', 'error');
       }
     } catch (error) {
-      showToast('Network error', 'error');
+      showToast(error, 'error');
     }
   };
 
@@ -141,7 +173,7 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
             showToast(response.error || 'Failed to delete formula', 'error');
           }
         } catch (error) {
-          showToast('Network error', 'error');
+          showToast(error, 'error');
         } finally {
           setIsDeleting(false);
         }
@@ -184,29 +216,46 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
   };
 
   const handleExport = () => {
+    if (exportInProgress) {
+      showToast('Please wait for the current export to finish.', 'info');
+      return;
+    }
     setMenuVisible(true);
   };
 
-  const exportItem = async (type: 'supplement' | 'csv' | 'summary') => {
-    setMenuVisible(false);
-    try {
-      let response: any = null;
-      if (type === 'supplement') {
-        response = await apiService.exportSupplementLabel(formulaId);
-      } else if (type === 'csv') {
-        response = await apiService.exportFormulaCSV(formulaId);
-      } else if (type === 'summary') {
-        response = await apiService.exportFormulaSummary(formulaId);
-      }
+  const getExportFileName = (type: ExportType): string | undefined => {
+    const safeBase = sanitizeDownloadFileName(formula?.name ?? '') || `formula-${formulaId ?? 'export'}`;
+    const suffix = EXPORT_CONFIG[type].suffix;
+    return `${safeBase}-${suffix}`;
+  };
 
-      if (response && response.data) {
-        showToast('Export successful!', 'success');
-        // TODO: handle download/path
-      } else {
-        showToast((response && response.error) || 'Export failed', 'error');
-      }
+  const exportItem = async (type: ExportType) => {
+    if (exportInProgress) {
+      showToast('Please wait for the current export to finish.', 'info');
+      return;
+    }
+
+    if (!formulaId) {
+      showToast('Unable to export without a formula.', 'error');
+      return;
+    }
+
+    setMenuVisible(false);
+    setExportInProgress(type);
+
+    try {
+      const config = EXPORT_CONFIG[type];
+      const fileName = getExportFileName(type);
+      const endpoint = config.path(formulaId);
+      await downloadFileFromApi(endpoint, {
+        fileName,
+        mimeType: config.mimeType,
+      });
+      showToast(config.toast, 'success');
     } catch (error) {
-      showToast('Network error', 'error');
+      showToast(error, 'error');
+    } finally {
+      setExportInProgress(null);
     }
   };
 
@@ -221,15 +270,37 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
   useEffect(() => {
     if (formulaId) {
       loadFormula();
+      void loadCachedComplianceResult();
     }
-  }, [formulaId, loadFormula]);
+  }, [formulaId, loadFormula, loadCachedComplianceResult]);
+
+  useEffect(() => {
+    if (!formulaId) {
+      return;
+    }
+
+    const offComplianceChecked = on('formula:compliance_checked', (payload) => {
+      if (payload?.formulaId === formulaId && payload?.result) {
+        const result = payload.result as ComplianceResult;
+        setCompliance(result);
+        void AsyncStorage.setItem(complianceCacheKey(formulaId), JSON.stringify(result)).catch((error) => {
+          console.warn('Failed to persist compliance result from detail view', error);
+        });
+      }
+    });
+
+    return () => {
+      offComplianceChecked();
+    };
+  }, [formulaId]);
 
   useFocusEffect(
     useCallback(() => {
       if (formulaId) {
         loadFormula();
+        void loadCachedComplianceResult();
       }
-    }, [formulaId, loadFormula])
+    }, [formulaId, loadFormula, loadCachedComplianceResult])
   );
 
   const getTotalWeight = () => {
@@ -250,11 +321,22 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
   };
 
   const getComplianceStatus = () => {
-    if (!formula?.ingredients) return { status: 'EMPTY', variant: 'neutral' as const };
-    const count = formula.ingredients.length;
-    if (count === 0) return { status: 'EMPTY', variant: 'neutral' as const };
-    if (count > 10) return { status: 'RISK', variant: 'error' as const };
-    if (count > 5) return { status: 'WARNING', variant: 'warning' as const };
+    if (compliance) {
+      const variant =
+        compliance.status === 'APPROVED'
+          ? 'success'
+          : compliance.status === 'WARNING'
+            ? 'warning'
+            : compliance.status === 'STOP'
+              ? 'error'
+              : 'neutral';
+      return { status: compliance.status, variant } as const;
+    }
+
+    const ingredientCount = formula?.ingredients?.length ?? (formula as any)?.items?.length ?? 0;
+    if (ingredientCount === 0) return { status: 'EMPTY', variant: 'neutral' as const };
+    if (ingredientCount > 10) return { status: 'RISK', variant: 'error' as const };
+    if (ingredientCount > 5) return { status: 'WARNING', variant: 'warning' as const };
     return { status: 'APPROVED', variant: 'success' as const };
   };
 
@@ -395,11 +477,10 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
           <View style={styles.complianceHeader}>
             <Text style={styles.sectionTitle}>Compliance Check</Text>
             <Button
-              title={isCheckingCompliance ? 'Checking...' : 'Check Now'}
+              title="Check Now"
               variant="outline"
               size="small"
-              onPress={checkCompliance}
-              loading={isCheckingCompliance}
+              onPress={handleComplianceCheck}
             />
           </View>
 
@@ -449,7 +530,7 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
             </View>
           ) : (
             <Text style={styles.emptyText}>
-              No compliance check performed yet. Click "Check Now" to analyze this formula.
+              No compliance check performed yet. Tap “Check Now” to analyze this formula.
             </Text>
           )}
         </Card>
@@ -483,15 +564,16 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
             style={styles.actionButton}
             leftIcon="copy-outline"
           />
-          <Button
-            title="Export"
-            variant="primary"
-            size="large"
-            fullWidth
-            onPress={handleExport}
-            style={styles.actionButton}
-            leftIcon="download-outline"
-          />
+            <Button
+              title="Export"
+              variant="primary"
+              size="large"
+              fullWidth
+              onPress={handleExport}
+              loading={!!exportInProgress}
+              style={styles.actionButton}
+              leftIcon="download-outline"
+            />
           <Button
             title="Delete Formula"
             variant="outline"
@@ -507,9 +589,21 @@ export const FormulaDetailScreen: React.FC<FormulaDetailScreenProps> = ({ naviga
           visible={menuVisible}
           title="Export"
           items={[
-            { label: 'Supplement Label', icon: 'document-text-outline', onPress: () => exportItem('supplement') },
-            { label: 'CSV', icon: 'library-outline', onPress: () => exportItem('csv') },
-            { label: 'Summary PDF', icon: 'document-attach-outline', onPress: () => exportItem('summary') },
+            {
+              label: exportInProgress === 'supplement' ? 'Preparing supplement label…' : 'Supplement Label',
+              icon: exportInProgress === 'supplement' ? 'time-outline' : 'document-text-outline',
+              onPress: () => exportItem('supplement'),
+            },
+            {
+              label: exportInProgress === 'csv' ? 'Preparing CSV…' : 'CSV',
+              icon: exportInProgress === 'csv' ? 'time-outline' : 'library-outline',
+              onPress: () => exportItem('csv'),
+            },
+            {
+              label: exportInProgress === 'summary' ? 'Preparing summary…' : 'Summary PDF',
+              icon: exportInProgress === 'summary' ? 'time-outline' : 'document-attach-outline',
+              onPress: () => exportItem('summary'),
+            },
           ]}
           onRequestClose={() => setMenuVisible(false)}
         />

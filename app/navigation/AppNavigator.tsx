@@ -15,6 +15,7 @@ import FormulaBuilderScreen from '../screens/FormulaBuilderScreen';
 import FormulaDetailScreen from '../screens/FormulaDetailScreen';
 import FormulasScreen from '../screens/FormulasScreen';
 import HomeScreen from '../screens/HomeScreen';
+import ComplianceResultScreen from '../screens/ComplianceResultScreen';
 import IngredientDetailScreen from '../screens/IngredientDetailScreen';
 import IngredientPickerScreen from '../screens/IngredientPickerScreen';
 import IngredientsScreen from '../screens/IngredientsScreen';
@@ -154,6 +155,7 @@ const MainStack = () => {
       {/* Formula screens */}
       <Stack.Screen name="FormulaBuilder" component={FormulaBuilderScreen} />
       <Stack.Screen name="FormulaDetail" component={FormulaDetailScreen} />
+  <Stack.Screen name="ComplianceResults" component={ComplianceResultScreen} />
       <Stack.Screen name="IngredientPicker" component={IngredientPickerScreen} />
       <Stack.Screen name="IngredientPickerDetail" component={IngredientDetailScreen} />
       {/* Profile screens */}

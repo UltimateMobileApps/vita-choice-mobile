@@ -22,7 +22,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "versionCode": 1,
-      "package": "com.yourcompany.vitachoice"
+      "package": "com.se7enincs.vitachoice"
     },
     "web": {
       "output": "static",

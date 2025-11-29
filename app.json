@@ -32,11 +32,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash_transparent.png",   // replace with splash_transparent.png or splash_mono_white.png
-          "imageWidth": 220,                       // tweak if you want it bigger/smaller
+          "image": "./assets/splash-image.png",
           "resizeMode": "contain",
-          "backgroundColor": "#000000",
-          "dark": { "backgroundColor": "#000000" }
+          "backgroundColor": "#09101F",
+          "dark": {
+            "backgroundColor": "#09101F"
+          }
         }
       ]
     ],

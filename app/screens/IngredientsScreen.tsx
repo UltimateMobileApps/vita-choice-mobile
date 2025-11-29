@@ -3,14 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    FlatList,
+  FlatList,
   Modal,
-    RefreshControl,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  RefreshControl,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
   ScrollView,
 } from 'react-native';
 import { Badge, Button, Card, Input, LoadingSpinner, Skeleton } from '../../components/ui';
@@ -43,7 +43,7 @@ interface IngredientsScreenProps {
 
 export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
   const { showToast } = useToast();
-  
+
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -78,7 +78,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
       if (cached) {
         const { data, timestamp } = JSON.parse(cached);
         const isExpired = Date.now() - timestamp > CACHE_EXPIRY;
-        
+
         if (!isExpired && data.length > 0) {
           setIngredients(data);
           setTotalCount(data.length);
@@ -134,11 +134,20 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
       }
 
       if (safetyValue) {
-        params.safety_level = safetyValue;
+        // Map UI safety levels to backend safety strings
+        if (safetyValue === 'SAFE') {
+          params.safety = 'General Dietary Use';
+        } else if (safetyValue === 'RISK') {
+          params.safety = 'Restricted/Controlled or High-Risk';
+        } else if (safetyValue === 'CAUTION') {
+          params.safety = 'Topical/External Use Only';
+        } else {
+          params.safety = safetyValue;
+        }
       }
 
       const response = await apiService.getIngredients(params);
-      
+
       if (response.data) {
         const newIngredients = response.data.results;
         const count = (response.data as any).count;
@@ -147,7 +156,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
         } else if (pageNum === 1 && !search && !filters.categories.length && !filters.sources.length && !safetyValue) {
           setTotalCount(newIngredients.length);
         }
-        
+
         if (pageNum === 1 || isRefresh) {
           setIngredients(newIngredients);
           // Cache first page results when no filters/search applied
@@ -355,7 +364,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
         }
       } finally {
         if (isMounted) {
-        setIsFilterOptionsLoading(false);
+          setIsFilterOptionsLoading(false);
         }
       }
     };
@@ -399,7 +408,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
     <Card
       style={styles.ingredientCard}
       onPress={() => {
-        navigation.navigate('IngredientDetail', { 
+        navigation.navigate('IngredientDetail', {
           ingredientId: item.id,
           mode: isSelectionMode ? 'select' : undefined
         });
@@ -430,7 +439,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
           )}
         </View>
       </View>
-      
+
       <Text style={styles.safetyText} numberOfLines={2}>
         {item.safety}
       </Text>
@@ -457,7 +466,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
           </TouchableOpacity>
         )}
       </View>
-      
+
       <Input
         placeholder={isSelectionMode ? "Search ingredients to add..." : "Search ingredients..."}
         value={searchQuery}
@@ -519,7 +528,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
         {searchQuery ? 'No ingredients found' : 'No ingredients available'}
       </Text>
       <Text style={styles.emptyText}>
-        {searchQuery 
+        {searchQuery
           ? `No ingredients match "${searchQuery}". Try different keywords.`
           : 'There are no ingredients to display at the moment.'
         }
@@ -542,7 +551,7 @@ export const IngredientsScreen: React.FC<any> = ({ navigation, route }) => {
       style={styles.container}
     >
       <StatusBar barStyle="light-content" />
-      
+
       <Modal
         visible={filterModalVisible}
         animationType="slide"

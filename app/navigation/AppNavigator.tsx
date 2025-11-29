@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as SplashScreen from 'expo-splash-screen';
 import React from 'react';
+import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 import { theme } from '../../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -29,7 +31,7 @@ import UpdateProfileScreen from '../screens/profile/UpdateProfileScreen';
 // const FormulasScreen = () => {
 //   const { View, Text, StyleSheet } = require('react-native');
 //   const { LinearGradient } = require('expo-linear-gradient');
-  
+
 //   return (
 //     <LinearGradient
 //       colors={[theme.colors.primary, theme.colors.secondary]}
@@ -45,7 +47,7 @@ import UpdateProfileScreen from '../screens/profile/UpdateProfileScreen';
 // const ProfileScreen = () => {
 //   const { View, Text, StyleSheet } = require('react-native');
 //   const { LinearGradient } = require('expo-linear-gradient');
-  
+
 //   return (
 //     <LinearGradient
 //       colors={[theme.colors.primary, theme.colors.secondary]}
@@ -155,7 +157,7 @@ const MainStack = () => {
       {/* Formula screens */}
       <Stack.Screen name="FormulaBuilder" component={FormulaBuilderScreen} />
       <Stack.Screen name="FormulaDetail" component={FormulaDetailScreen} />
-  <Stack.Screen name="ComplianceResults" component={ComplianceResultScreen} />
+      <Stack.Screen name="ComplianceResults" component={ComplianceResultScreen} />
       <Stack.Screen name="IngredientPicker" component={IngredientPickerScreen} />
       <Stack.Screen name="IngredientPickerDetail" component={IngredientDetailScreen} />
       {/* Profile screens */}
@@ -169,8 +171,25 @@ const MainStack = () => {
 export const AppNavigator: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
 
+  React.useEffect(() => {
+    // Hide the native splash screen once the React app is mounted.
+    // We will show our own JS splash screen (LoadingScreen) if isLoading is true.
+    SplashScreen.hideAsync().catch(() => {
+      // Ignore errors if splash screen is already hidden
+    });
+  }, []);
+
   if (isLoading) {
-    return null; // Could render a splash/loading component here
+    return (
+      <View style={styles.loadingContainer}>
+        <Image
+          source={require('../../assets/splash-image.png')}
+          style={styles.splashImage}
+          resizeMode="contain"
+        />
+        <ActivityIndicator size="large" color={theme.colors.accent} style={styles.spinner} />
+      </View>
+    );
   }
 
   return (
@@ -183,5 +202,23 @@ export const AppNavigator: React.FC = () => {
     </RootStack.Navigator>
   );
 };
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#09101F', // Match app.json splash background
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  splashImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  spinner: {
+    position: 'absolute',
+    bottom: 80,
+  },
+});
 
 export default AppNavigator;

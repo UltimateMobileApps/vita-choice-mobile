@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decode as base64Decode } from 'base-64';
 
 // API configuration
-const API_BASE_URL = 'https://vita-choice-backend.onrender.com/api';
+const API_BASE_URL = 'https://api.thevitachoice.com/api';
 // const API_BASE_URL = 'https://309a627b3067.ngrok-free.app/api'
 
 interface ApiResponse<T = any> {
@@ -276,7 +276,7 @@ class ApiService {
       const url = `${this.baseURL}${endpoint}`;
       const includeContentType = options.method !== 'GET';
       const headers = await this.getAuthHeaders(includeContentType);
-      
+
       const response = await this.fetchWithTimeout(url, {
         ...options,
         headers: {
@@ -287,7 +287,7 @@ class ApiService {
 
       if (response.status === 401 && this.tokens?.refresh) {
         // Try to refresh token
-  const refreshed = await this.refreshToken('request');
+        const refreshed = await this.refreshToken('request');
         if (refreshed) {
           // Retry the original request
           const newHeaders = await this.getAuthHeaders(includeContentType);
@@ -298,13 +298,13 @@ class ApiService {
               ...options.headers,
             },
           });
-          
+
           if (retryResponse.ok) {
             const data = await retryResponse.json();
             return { data };
           }
         }
-        
+
         // If refresh failed, handle auth failure
         if (this.authFailureHandler) {
           await this.authFailureHandler('auth-error', 'Authentication failed. Please login again.');
@@ -352,14 +352,14 @@ class ApiService {
       return { data };
     } catch (error: any) {
       console.error('API Request Error:', error);
-      
+
       // Retry logic for network errors (not for authentication or client errors)
       if (retryCount < this.MAX_RETRIES && this.isRetryableError(error)) {
         console.log(`Retrying request (attempt ${retryCount + 1}/${this.MAX_RETRIES})`);
         await this.delay(1000 * (retryCount + 1)); // Exponential backoff
         return this.request(endpoint, options, retryCount + 1);
       }
-      
+
       // Include endpoint/method context for network errors as well
       try {
         const method = (options && (options.method as string)) || 'GET';
@@ -380,8 +380,8 @@ class ApiService {
       'ERR_NETWORK',
       'ERR_INTERNET_DISCONNECTED'
     ];
-    
-    return retryableMessages.some(msg => 
+
+    return retryableMessages.some(msg =>
       error.message?.includes(msg) || error.toString().includes(msg)
     );
   }
@@ -656,7 +656,7 @@ class ApiService {
     page_size?: number;
   }): Promise<ApiResponse<{ count: number; results: Ingredient[] }>> {
     const searchParams = new URLSearchParams();
-    
+
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value === undefined || value === null) return;
@@ -677,7 +677,7 @@ class ApiService {
 
     const query = searchParams.toString();
     const endpoint = query ? `/ingredients/?${query}` : '/ingredients/';
-    
+
     return this.request<{ count: number; results: Ingredient[] }>(endpoint);
   }
 
@@ -692,7 +692,7 @@ class ApiService {
       if (cached) {
         const { data, timestamp } = JSON.parse(cached);
         const isExpired = Date.now() - timestamp > 24 * 60 * 60 * 1000; // 24 hours
-        
+
         if (!isExpired) {
           return { data };
         }
@@ -702,7 +702,7 @@ class ApiService {
     }
 
     const response = await this.request<string[]>('/ingredients/categories/');
-    
+
     if (response.data) {
       // Cache the result
       try {
@@ -725,7 +725,7 @@ class ApiService {
       if (cached) {
         const { data, timestamp } = JSON.parse(cached);
         const isExpired = Date.now() - timestamp > 24 * 60 * 60 * 1000; // 24 hours
-        
+
         if (!isExpired) {
           return { data };
         }
@@ -735,7 +735,7 @@ class ApiService {
     }
 
     const response = await this.request<string[]>('/ingredients/sources/');
-    
+
     if (response.data) {
       // Cache the result
       try {
@@ -923,5 +923,5 @@ export type {
   FormulaIngredient, Ingredient, User
 };
 
-    export { API_BASE_URL };
+export { API_BASE_URL };
 

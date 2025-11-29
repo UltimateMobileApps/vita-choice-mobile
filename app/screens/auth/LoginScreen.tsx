@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useState } from 'react';
 import {
-    Image,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Image,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -16,7 +16,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 
 export const LoginScreen: React.FC<any> = ({ navigation }) => {
-  const { login, isLoading } = useAuth();
+  const { login, isLoading, isGuestUser } = useAuth();
   const { showToast } = useToast();
 
   const [formData, setFormData] = useState({
@@ -62,9 +62,21 @@ export const LoginScreen: React.FC<any> = ({ navigation }) => {
 
     setIsSubmitting(true);
     try {
+      // Capture guest status before login
+      const wasGuest = isGuestUser;
       const result = await login(formData.email, formData.password, rememberMe);
+
       if (result.success) {
         showToast('Logged in successfully!', 'success');
+
+        // If user was a guest, they are in MainStack and need explicit navigation
+        // If user was in AuthStack, AppNavigator will handle the switch automatically
+        if (wasGuest) {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'MainTabs' }],
+          });
+        }
       } else {
         showToast(result.error || 'Login failed', 'error');
       }
@@ -77,7 +89,7 @@ export const LoginScreen: React.FC<any> = ({ navigation }) => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [formData.email, formData.password, login, showToast, navigation, validateForm]);
+  }, [formData.email, formData.password, login, showToast, navigation, validateForm, isGuestUser, rememberMe]);
 
   return (
     <LinearGradient
